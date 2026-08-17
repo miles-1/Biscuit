@@ -5,16 +5,19 @@ using Libdl
 export decode_matrix
 
 function _find_libdmtx()::String
-    found = Libdl.find_library(
-        ["libdmtx", "dmtx"],
-        [
-            "/opt/homebrew/lib",
-            "/usr/local/lib",
-            "/usr/lib",
-            "/usr/lib/x86_64-linux-gnu",
-            "/usr/lib/aarch64-linux-gnu",
-        ],
-    )
+    search_dirs = String[
+        normpath(joinpath(Sys.BINDIR, "..", "lib")),
+        normpath(joinpath(Sys.BINDIR, "..", "Resources", "lib")),
+        normpath(joinpath(Sys.BINDIR, "..", "..", "Resources", "lib")),
+        "/opt/homebrew/lib",
+        "/usr/local/lib",
+        "/usr/lib",
+        "/usr/lib/x86_64-linux-gnu",
+        "/usr/lib/aarch64-linux-gnu",
+    ]
+    search_dirs = filter(isdir, search_dirs)
+
+    found = Libdl.find_library(["libdmtx", "dmtx"], search_dirs)
     isempty(found) && error(
         "libdmtx not found. Install it (macOS: `brew install libdmtx`; " *
         "Debian/Ubuntu: `sudo apt install libdmtx0t64`) and retry."

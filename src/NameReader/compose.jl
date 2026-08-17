@@ -16,7 +16,16 @@ const NAME_FIELD_BASELINE_FRAC = (55 - 13) / 55
 """
 Default directory for scanned blank name fields / assignment pages.
 """
-background_training_dir() = joinpath(@__DIR__, "background_training_images")
+function background_training_dir()
+    pkg = package_root()
+    p1 = joinpath(pkg, "src", "NameReader", "background_training_images")
+    isdir(p1) && return p1
+    p2 = joinpath(pkg, "Resources", "background_training_images")
+    isdir(p2) && return p2
+    p3 = joinpath(pkg, "background_training_images")
+    isdir(p3) && return p3
+    return joinpath(@__DIR__, "background_training_images")
+end
 
 """
     prepare_name_image(image; threshold=0.5, morphology_radius=1, isolated_pixel_radius=1)

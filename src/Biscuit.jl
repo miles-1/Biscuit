@@ -50,7 +50,7 @@ include("Server.jl")
 using .Server
 
 export package_root, config_dir, workspace_root
-export serve, serveparallel, terminate
+export serve, serveparallel, terminate, julia_main
 export generate_assn_files, process_scans, extract_name_field_crops
 export NameReader
 export train_name_reader

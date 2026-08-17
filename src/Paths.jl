@@ -8,8 +8,35 @@ export resolve_under_workspace
 
 """
 Directory containing `Project.toml`, `public/`, and `typst_doc_generators/`.
+Dynamically resolves to macOS app bundle Resources, PackageCompiler share dir, or source root.
 """
-package_root()::String = normpath(joinpath(@__DIR__, ".."))
+function package_root()::String
+    # 1. macOS app bundle: <AppName>.app/Contents/Resources (via Contents/app/bin or Contents/MacOS)
+    res_parent = normpath(joinpath(Sys.BINDIR, "..", "..", "Resources"))
+    if isdir(res_parent) && isfile(joinpath(res_parent, "public", "index.html"))
+        return res_parent
+    end
+
+    res_direct = normpath(joinpath(Sys.BINDIR, "..", "Resources"))
+    if isdir(res_direct) && isfile(joinpath(res_direct, "public", "index.html"))
+        return res_direct
+    end
+
+    # 2. Standalone PackageCompiler app: <AppDir>/share/biscuit
+    app_share = normpath(joinpath(Sys.BINDIR, "..", "share", "biscuit"))
+    if isdir(app_share) && isfile(joinpath(app_share, "public", "index.html"))
+        return app_share
+    end
+
+    # 3. Standalone PackageCompiler app root: <AppDir>
+    app_root = normpath(joinpath(Sys.BINDIR, ".."))
+    if isdir(app_root) && isfile(joinpath(app_root, "public", "index.html"))
+        return app_root
+    end
+
+    # 4. Fallback to package source tree (during development)
+    return normpath(joinpath(@__DIR__, ".."))
+end
 
 """
 Per-user app config (`google_drive_token.json`, `classes/`). Not course data.

@@ -1,5 +1,7 @@
 module NameReader
 
+using ..Paths: package_root
+
 """
     NameReader
 

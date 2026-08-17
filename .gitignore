@@ -1,1 +1,8 @@
 google_drive_client.json
+build/
+*.dylib
+*.so
+*.dll
+*.icns
+*.sysimage
+

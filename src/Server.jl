@@ -14,7 +14,7 @@ using ..ProcessScans
 using ..NameReader
 using ..Paths: package_root, resolve_under_workspace
 
-export serve, serveparallel, terminate
+export serve, serveparallel, terminate, julia_main
 
 const STATE = Dict{String, Any}(
     "assn_archive_path" => nothing,
@@ -52,6 +52,46 @@ atexit() do
 end
 
 include("ServerUtils.jl")
+
+function _ensure_standard_mac_paths!()
+    if Sys.isapple()
+        extra_paths = [
+            normpath(joinpath(Sys.BINDIR, "..", "..", "Resources", "bin")),
+            normpath(joinpath(Sys.BINDIR, "..", "Resources", "bin")),
+            normpath(joinpath(Sys.BINDIR, "..", "bin")),
+            "/opt/homebrew/bin",
+            "/opt/homebrew/sbin",
+            "/usr/local/bin",
+            joinpath(homedir(), ".cargo", "bin"),
+            joinpath(homedir(), ".local", "bin"),
+        ]
+        curr_path = get(ENV, "PATH", "")
+        for p in extra_paths
+            if isdir(p) && !occursin(p, curr_path)
+                curr_path = p * ":" * curr_path
+            end
+        end
+        ENV["PATH"] = curr_path
+    end
+end
+
+Base.@ccallable function julia_main()::Cint
+    _ensure_standard_mac_paths!()
+    try
+        if Sys.isapple()
+            @async begin
+                sleep(1.0)
+                try; run(`open http://127.0.0.1:8080`); catch; end
+            end
+        end
+        serve(host="127.0.0.1", port=8080)
+    catch
+        Base.invokelatest(Base.display_error, Base.catch_stack())
+        return 1
+    end
+    return 0
+end
+
 
 # Oxygen route macros mutate Oxygen's global router. That must happen at runtime: during
 # package precompilation those mutations are discarded, which left GET / (and every API
