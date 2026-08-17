@@ -77,13 +77,18 @@ end
 
 Base.@ccallable function julia_main()::Cint
     _ensure_standard_mac_paths!()
-    try
-        if Sys.isapple()
-            @async begin
-                sleep(1.0)
-                try; run(`open http://127.0.0.1:8080`); catch; end
-            end
+    if Sys.isapple()
+        try
+            # Initialize AppKit to check in with WindowServer and stop Dock bounce
+            ccall((:NSApplicationLoad, "/System/Library/Frameworks/AppKit.framework/AppKit"), Cint, ())
+        catch
         end
+        @async begin
+            sleep(0.8)
+            try; run(`open http://127.0.0.1:8080`); catch; end
+        end
+    end
+    try
         serve(host="127.0.0.1", port=8080)
     catch
         Base.invokelatest(Base.display_error, Base.catch_stack())
