@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Biscuit</title>
+    <link rel="icon" href="/favicon.ico" sizes="any">
+    <link rel="icon" href="/biscuit.png" type="image/png">
+    <script>
+        // Apply saved/system theme before paint to avoid a light flash.
+        (function () {
+            const t = localStorage.getItem('biscuit-theme') || localStorage.getItem('exam-theme') || 'system';
+            if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
+            else document.documentElement.removeAttribute('data-theme');
+        })();
+    </script>
+    <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+    <div class="top-chrome">
+        <nav class="app-tabs" aria-label="App">
+            <button type="button" class="app-tab" id="tab-home" onclick="goHome()">home</button>
+            <button type="button" class="app-tab" id="tab-help" onclick="openHelpModal()">help</button>
+            <button type="button" class="app-tab" id="tab-classes" onclick="openClassesModal()">classes</button>
+        </nav>
+        <div class="theme-bar">
+            <label for="theme-select">Theme</label>
+            <select id="theme-select" aria-label="Color theme">
+                <option value="system">System</option>
+                <option value="light">Light</option>
+                <option value="dark">Dark</option>
+            </select>
+        </div>
+    </div>
+
+    <div id="main-menu">
+        <h1 class="brand-title">
+            <img src="biscuit.png" alt="" class="brand-logo" width="48" height="48">
+            <span>Biscuit</span>
+        </h1>
+        <label class="workflow-toggle" for="show-workflow">
+            <input type="checkbox" id="show-workflow">
+            Show full workflow
+        </label>
+        <div id="menu-stage" class="menu-stage">
+            <div id="workflow-host" class="workflow-host hidden" aria-hidden="true"></div>
+            <div class="menu-actions">
+                <button type="button" class="menu-btn" data-slot="1" onclick="showSection('generate-sec')">
+                    <span class="menu-btn-num">1</span>
+                    <span class="menu-btn-label">Create Assignment</span>
+                </button>
+                <button type="button" class="menu-btn" data-slot="2" onclick="showSection('process-sec')">
+                    <span class="menu-btn-num">2</span>
+                    <span class="menu-btn-label">Process Scans</span>
+                </button>
+                <button type="button" class="menu-btn" data-slot="3" onclick="showSection('grade-sec')">
+                    <span class="menu-btn-num">3</span>
+                    <span class="menu-btn-label">Grade Assignments</span>
+                </button>
+                <button type="button" class="menu-btn" data-slot="4" onclick="showSection('namereader-sec')">
+                    <span class="menu-btn-num">4</span>
+                    <span class="menu-btn-label">Name Recognition <em>(Optional)</em></span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 1. Create Assignment -->
+    <div id="generate-sec" class="section hidden">
+        <h2>Create Assignment</h2>
+        <label>Master JSON File Path:</label><br>
+        <div class="input-with-status-wrap">
+            <input type="text" id="gen-master-path" oninput="syncGenerateNameFromPath(); validateMasterPathDebounced();">
+            <span id="gen-master-spinner" class="input-spinner hidden"></span>
+            <span id="gen-master-check" class="input-status-icon success hidden">✔</span>
+            <span id="gen-master-cross" class="input-status-icon error hidden">✕</span>
+        </div>
+        <button type="button" onclick="openMasterBuilder()">Create New</button>
+        <button type="button" onclick="pickFile('gen-master-path', ['.json'])">Browse</button><br>
+        <div id="gen-master-validation-msg" class="master-validation-msg"></div><br>
+        <label>New File Name (without extension):</label><br>
+        <input type="text" id="gen-new-name" oninput="updateGenerateNameStatus()">
+        <div id="gen-name-warning" style="font-size: 12px; margin-top: 4px;"></div><br>
+        <label for="gen-class-select">Select Class <em>(optional)</em>:</label><br>
+        <div class="class-select-row">
+            <select id="gen-class-select"></select>
+            <button type="button" onclick="openClassesModal()">Add New</button>
+        </div>
+        <br>
+        <button type="button" onclick="generateAssnFiles()">Run</button>
+        <button type="button" onclick="goHome()">Back</button>
+        <h3>Output:</h3>
+        <pre class="output" id="gen-output"></pre>
+    </div>
+
+    <!-- 1.5 Assignment Builder (Create New / Edit) -->
+    <div id="builder-sec" class="section workspace-ui hidden" style="margin-top:0; border:none; padding:0;">
+        <div class="grade-toolbar">
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <h2 style="margin: 0;">Assignment Builder</h2>
+                </div>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <button type="button" style="font-weight: bold;" onclick="triggerPreview()">
+                        <span>👁 Preview</span>
+                    </button>
+                    <button type="button" onclick="openSaveMasterModal()">
+                        <span>💾 Save Assignment JSON</span>
+                    </button>
+                    <button type="button" onclick="pickFileToLoadBuilder()">
+                        <span>📂 Load JSON</span>
+                    </button>
+                    <button type="button" onclick="closeMasterBuilder()">Back</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="split-view">
+            <!-- Left Pane: Typst Preview -->
+            <div class="left-pane builder-left-pane">
+                <div class="builder-preview-toolbar">
+                    <span id="builder-preview-header-info" class="builder-preview-info">No preview</span>
+                    <div class="builder-preview-zoom-controls">
+                        <button type="button" class="btn-icon" title="Zoom Out" onclick="zoomPreview(-0.15)">−</button>
+                        <button type="button" class="btn-icon" title="Reset Zoom" onclick="zoomPreview(0)">100%</button>
+                        <button type="button" class="btn-icon" title="Zoom In" onclick="zoomPreview(0.15)">+</button>
+                    </div>
+                </div>
+                <div id="builder-preview-content" class="builder-preview-container"></div>
+            </div>
+
+            <!-- Right Pane: Assignment Form / Builder -->
+            <div class="right-pane builder-right-pane">
+                <div id="builder-form-container"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 2. Process Scans -->
+    <div id="process-sec" class="section hidden">
+        <h2>Process Scans</h2>
+        <label>TIFF File Path:</label><br>
+        <input type="text" id="proc-tiff-path" oninput="bustScanImageCache()">
+        <button onclick="pickFile('proc-tiff-path', ['.tif', '.tiff'])">Browse</button><br>
+        <label>Assignment Versions File Path (.assnversions):</label><br>
+        <input type="text" id="proc-assnversions-path" oninput="syncProcessNameFromPath(); bustScanImageCache()">
+        <button onclick="pickFile('proc-assnversions-path', ['.assnversions'])">Browse</button><br>
+        <label>New File Name (without extension):</label><br>
+        <input type="text" id="proc-new-name" oninput="updateProcessNameStatus()">
+        <div id="proc-name-warning" style="font-size: 12px; margin-top: 4px;"></div><br>
+        <label>Name Reader File <em>(optional, .namereader)</em>:</label><br>
+        <input type="text" id="proc-namereader-path">
+        <button type="button" onclick="pickFile('proc-namereader-path', ['.namereader'])">Browse</button><br><br>
+        <button onclick="processScans()">Run</button>
+        <button onclick="goHome()">Back</button>
+        <h3>Output:</h3>
+        <pre class="output" id="proc-output"></pre>
+    </div>
+
+    <!-- 4. Name Recognition -->
+    <div id="namereader-sec" class="section hidden">
+        <h2>Name Recognition</h2>
+        <p>Train a name reader from per-student handwriting crops (exported in step 3). Each training sample overlays handwriting onto a randomly chosen blank name line from the package's <code>background_training_images</code> folder.</p>
+        <label>Training Data Folder:</label><br>
+        <input type="text" id="nr-handwriting-path" oninput="syncNameReaderNameFromPath()">
+        <button type="button" onclick="pickFolder('nr-handwriting-path')">Browse</button><br><br>
+        <label>New File Name (without extension):</label><br>
+        <input type="text" id="nr-output-name" oninput="updateNameReaderNameStatus()">
+        <div id="nr-name-warning" style="font-size: 12px; margin-top: 4px;"></div><br>
+        <button type="button" id="nr-train-btn" onclick="trainNameReader()">Train</button>
+        <button type="button" id="nr-stop-btn" onclick="stopNameReaderTraining()" disabled>Cancel Training</button>
+        <button type="button" onclick="goHome()">Back</button>
+        <h3>Output:</h3>
+        <pre class="output" id="nr-output"></pre>
+    </div>
+
+    <!-- 2.5 Verify Scans -->
+    <div id="verify-sec" class="section workspace-ui hidden" style="margin-top:0; border:none; padding:0;">
+        <div class="grade-toolbar">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <h2 style="margin:0;">Verify Scans</h2>
+                <div style="display:flex; flex-direction:column; gap:6px;">
+                    <button style="font-weight: bold;" onclick="finalizeScans()">
+                        <span class="btn-spinner hidden" id="finalize-scans-spinner"></span>
+                        <span id="finalize-scans-label">Finalize Scans</span>
+                    </button>
+                    <button onclick="leaveVerifyScans()">Back</button>
+                </div>
+            </div>
+            <div style="display: flex; justify-content: center; align-items: center; gap: 10px;">
+                <button onclick="prevVerifyPage()">&larr; Prev Page</button>
+                <div id="verify-page-dropdown" class="status-dropdown"></div>
+                <button onclick="nextVerifyPage()">Next Page &rarr;</button>
+            </div>
+        </div>
+        <div class="split-view">
+            <div class="left-pane" id="verify-left-pane">
+                <div class="pane-loading hidden" id="verify-loading">
+                    <span class="btn-spinner"></span>
+                    <span>Loading...</span>
+                </div>
+                <div class="page-wrap" id="verify-page-wrap" style="position: relative; display: inline-block;">
+                    <img id="verify-img" style="max-width: 100%; display: block;" onclick="handleVerifyClick(event)">
+                    <div id="verify-anchors-overlay" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;"></div>
+                </div>
+            </div>
+            <div class="right-pane" id="verify-right-pane">
+                <h3>Page Status</h3>
+                <p>Status: <strong id="verify-status"></strong></p>
+                <div id="verify-controls">
+                    <label>Assn ID:</label><br>
+                    <input type="number" id="verify-assn-id" min="0"><br><br>
+                    <label>Page Number:</label><br>
+                    <input type="number" id="verify-page-num" min="1"><br><br>
+                    <p style="font-size: 0.9em; color: #555;"><i>For pages that need correction, enter Assn ID and Page Number, then click at least 4 anchor positions on the image (up to 14).</i></p>
+                    <button type="button" onclick="clearVerifyAnchors()">Clear Anchors</button><br><br>
+                    <button type="button" onclick="saveVerifyCorrection()" style="font-weight: bold;">Save Correction</button>
+                </div>
+            </div>
+        </div>
+        <div id="verify-focus-sentinel" class="focus-sentinel" tabindex="-1" aria-hidden="true"></div>
+    </div>
+
+    <!-- 3. Grade Assignments Setup -->
+    <div id="grade-sec" class="section hidden">
+        <h2>Grade Assignments - Setup</h2>
+        <label>Assignment Archive File Path (.assn):</label><br>
+        <input type="text" id="grade-assn-path" oninput="bustScanImageCache()">
+        <button onclick="pickFile('grade-assn-path', ['.assn'])">Browse</button><br><br>
+        <button id="start-grading-btn" onclick="startGrading()">
+            <span class="btn-spinner hidden" id="start-grading-spinner"></span>
+            <span id="start-grading-label">Start Grading</span>
+        </button>
+        <button onclick="goHome()">Back</button>
+    </div>
+
+    <!-- Grading UI -->
+    <div id="grading-ui" class="section workspace-ui hidden" style="margin-top:0; border:none; padding:0;">
+        
+        <!-- Step 1: Assign Names -->
+        <div id="grade-step-1" class="grade-step hidden">
+            <div class="grade-toolbar">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <h2 style="margin:0;">Assign Student Names</h2>
+                    <div style="display:flex; flex-direction:column; gap:6px;">
+                        <button style="font-weight: bold;" onclick="finishNameAssn()">Continue to Grading &rarr;</button>
+                        <button id="save-work-btn-assign" style="font-weight: bold;" onclick="saveWork()">
+                            <span class="btn-spinner hidden" id="save-work-spinner-assign"></span>
+                            <span id="save-work-label-assign">Save Work</span>
+                        </button>
+                    </div>
+                </div>
+                <div style="display: flex; justify-content: center; align-items: center; gap: 10px;">
+                    <button id="btn-prev-assn-assign" onclick="prevAssn()">&larr; Prev Assn</button>
+                    <div id="assign-assn-dropdown" class="status-dropdown"></div>
+                    <button id="btn-next-assn-assign" onclick="nextAssn()">Next Assn &rarr;</button>
+                </div>
+            </div>
+            <div class="split-view">
+                <div class="left-pane" id="assign-left-pane">
+                    <!-- Image goes here -->
+                    <div class="pane-loading hidden" id="assign-loading">
+                        <span class="btn-spinner"></span>
+                        <span>Loading...</span>
+                    </div>
+                    <div class="page-wrap" id="assign-page-wrap"></div>
+                </div>
+                <div class="right-pane">
+                    <h3>Assign Name</h3>
+                    <p>Assn ID: <span id="assign-assn-id"></span></p>
+                    <div class="autocomplete">
+                        <input id="student-name-input" type="text" placeholder="Start typing name...">
+                        <div id="autocomplete-list" class="autocomplete-items"></div>
+                    </div>
+                    <div id="assign-name-warning" style="font-size: 12px; margin-top: 4px;"></div>
+                    <button type="button" onclick="assignCurrentName()">Assign</button>
+                </div>
+            </div>
+            <div id="assign-focus-sentinel" class="focus-sentinel" tabindex="-1" aria-hidden="true"></div>
+        </div>
+
+        <!-- Step 2: Grade Questions -->
+        <div id="grade-step-2" class="grade-step hidden">
+            <div class="grade-toolbar">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <h2 style="margin:0;">Grade Questions</h2>
+                    <div style="display:flex; flex-direction:column; gap:6px;">
+                        <button style="font-weight: bold;" onclick="returnToNameAssn()">&larr; Return to Name Assignment</button>
+                        <button id="save-work-btn-grade" style="font-weight: bold;" onclick="saveWork()">
+                            <span class="btn-spinner hidden" id="save-work-spinner-grade"></span>
+                            <span id="save-work-label-grade">Save Work</span>
+                        </button>
+                        <button id="finish-export-btn" style="font-weight: bold;" onclick="finishGrading()">
+                            <span class="btn-spinner hidden" id="finish-export-spinner"></span>
+                            <span id="finish-export-label">Finish &amp; Export</span>
+                        </button>
+                    </div>
+                </div>
+                <div style="display: flex; justify-content: center; align-items: center; gap: 10px;">
+                    <button id="btn-prev-q" onclick="prevQ()">&larr; Prev Question</button>
+                    <div id="grade-q-dropdown" class="status-dropdown"></div>
+                    <button id="btn-next-q" onclick="nextQ()">Next Question &rarr;</button>
+                </div>
+                <div style="display: flex; justify-content: center; align-items: center; gap: 10px;">
+                    <button id="btn-prev-assn-grade" onclick="prevGradeAssn()">&larr; Prev Assn</button>
+                    <div id="grade-assn-dropdown" class="status-dropdown"></div>
+                    <button id="btn-next-assn-grade" onclick="nextGradeAssn()">Next Assn &rarr;</button>
+                </div>
+            </div>
+            <div class="split-view">
+                <div class="left-pane" id="grade-left-pane">
+                    <div class="pane-loading hidden" id="grade-loading">
+                        <span class="btn-spinner"></span>
+                        <span>Loading...</span>
+                    </div>
+                    <div class="page-wrap" id="grade-page-wrap">
+                        <div id="grade-q-line" class="q-line hidden"></div>
+                    </div>
+                </div>
+                <div class="right-pane" id="grade-right-pane">
+                    <div id="question-info"></div>
+                    <div id="grading-options"></div>
+                </div>
+            </div>
+            <div id="grade-focus-sentinel" class="focus-sentinel" tabindex="-1" aria-hidden="true"></div>
+        </div>
+
+    </div>
+
+    <!-- Custom File Picker Modal -->
+    <div id="file-picker-modal" class="hidden modal-overlay">
+        <div class="file-picker-card">
+            <div class="file-picker-header">
+                <h3>Select File</h3>
+                <button type="button" id="file-picker-use-folder" class="hidden" onclick="useCurrentPickerFolder()">Use This Folder</button>
+                <button onclick="closeFilePicker()">Close</button>
+            </div>
+            <div>
+                <strong>Current Dir:</strong> <span id="file-picker-dir">.</span>
+            </div>
+            <div id="file-picker-list">
+                <!-- Entries go here -->
+            </div>
+        </div>
+    </div>
+
+    <div id="existing-tmp-modal" class="hidden modal-overlay">
+        <div class="modal-card">
+            <h3>Existing Temp Data Found</h3>
+            <p id="existing-tmp-message"></p>
+            <div class="modal-actions">
+                <button id="existing-tmp-load-btn">Load Existing Data</button>
+                <button id="existing-tmp-replace-btn">Delete Existing and Reload</button>
+                <button id="existing-tmp-cancel-btn">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="export-modal" class="hidden modal-overlay">
+        <div class="modal-card export-modal-card">
+            <div class="modal-card-header">
+                <h3 id="export-modal-title">Finish &amp; Export</h3>
+                <button type="button" class="modal-close-btn" id="export-modal-close" aria-label="Close">&times;</button>
+            </div>
+            <div id="export-modal-body"></div>
+            <div class="modal-actions" id="export-modal-actions"></div>
+        </div>
+    </div>
+
+    <div id="message-modal" class="hidden modal-overlay" role="dialog" aria-modal="true" aria-labelledby="message-modal-title">
+        <div class="modal-card">
+            <div class="modal-card-header">
+                <h3 id="message-modal-title">Notice</h3>
+                <button type="button" class="modal-close-btn" id="message-modal-close" aria-label="Close">&times;</button>
+            </div>
+            <p id="message-modal-body" class="message-modal-body"></p>
+            <div class="modal-actions">
+                <button type="button" id="message-modal-ok">OK</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="verify-prompt-modal" class="hidden modal-overlay" role="dialog" aria-modal="true" aria-labelledby="verify-prompt-title">
+        <div class="modal-card">
+            <div class="modal-card-header">
+                <h3 id="verify-prompt-title">Scans Processed</h3>
+                <button type="button" class="modal-close-btn" onclick="closeVerifyPrompt()" aria-label="Close">&times;</button>
+            </div>
+            <p class="message-modal-body">Review page identification before grading? You can correct misidentified pages and reprocess.</p>
+            <div class="modal-actions">
+                <button type="button" style="font-weight: bold;" id="verify-scans-prompt-btn" onclick="acceptVerifyPrompt()">
+                    <span class="btn-spinner hidden" id="verify-scans-prompt-spinner"></span>
+                    <span id="verify-scans-prompt-label">Verify Scans</span>
+                </button>
+                <button type="button" onclick="closeVerifyPrompt()">Not now</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="help-modal" class="hidden modal-overlay" role="dialog" aria-modal="true" aria-labelledby="help-modal-title">
+        <div class="modal-card">
+            <div class="modal-card-header">
+                <h3 id="help-modal-title">Help</h3>
+                <button type="button" class="modal-close-btn" id="help-modal-close" aria-label="Close">&times;</button>
+            </div>
+            <p class="message-modal-body">Help content coming soon.</p>
+            <div class="modal-actions">
+                <button type="button" id="help-modal-ok">OK</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="classes-modal" class="hidden modal-overlay" role="dialog" aria-modal="true" aria-labelledby="classes-modal-title">
+        <div class="modal-card classes-modal-card">
+            <div class="modal-card-header">
+                <h3 id="classes-modal-title">Classes</h3>
+                <button type="button" class="modal-close-btn" id="classes-modal-close" aria-label="Close">&times;</button>
+            </div>
+            <div class="classes-table-wrap">
+                <table class="classes-table" id="classes-table">
+                    <thead>
+                        <tr>
+                            <th>class name</th>
+                            <th>number students</th>
+                            <th>export Canvas grades <code>.csv</code></th>
+                            <th>export feedback to Drive</th>
+                            <th>last edited</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody id="classes-table-body"></tbody>
+                </table>
+            </div>
+            <p id="classes-modal-status" class="classes-modal-status"></p>
+            <div class="new-class-form">
+                <h4>New Class</h4>
+                <label for="new-class-name">Class name:</label>
+                <input type="text" id="new-class-name" placeholder="e.g. Math 101">
+                <br/>
+                <label for="new-class-csv-path">Roster CSV:</label>
+                <input type="text" id="new-class-csv-path" readonly placeholder="No file selected">
+                <button type="button" onclick="pickNewClassCsvNative()">Browse</button>
+                <button type="button" id="new-class-add-btn" onclick="addNewClass()">Add Class</button>
+            </div>
+            <div class="modal-actions">
+                <button type="button" id="classes-modal-done">Done</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="save-master-modal" class="hidden modal-overlay" role="dialog" aria-modal="true" aria-labelledby="save-master-title">
+        <div class="modal-card" style="max-width: 520px;">
+            <div class="modal-card-header">
+                <h3 id="save-master-title">Save Master JSON</h3>
+                <button type="button" class="modal-close-btn" onclick="closeSaveMasterModal()" aria-label="Close">&times;</button>
+            </div>
+            <p style="margin: 4px 0 10px; font-size: 0.92rem; color: var(--text-muted);">
+                Save this master JSON file in your workspace.
+            </p>
+            <label for="save-master-path-input"><strong>File Path:</strong></label><br>
+            <input type="text" id="save-master-path-input" style="width: 100%; box-sizing: border-box; margin-top: 4px;" placeholder="practice/my_exam.json">
+            <p id="save-master-status" class="classes-modal-status"></p>
+            <div class="modal-actions">
+                <button type="button" style="font-weight: bold;" onclick="confirmSaveMaster()">Save File</button>
+                <button type="button" onclick="closeSaveMasterModal()">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="app-globals.js"></script>
+    <script src="app-setup.js"></script>
+    <script src="app-builder.js"></script>
+    <script src="app-classes.js"></script>
+    <script src="app-verify.js"></script>
+    <script src="app-scans.js"></script>
+    <script src="app-grade-shared.js"></script>
+    <script src="app-grade-assign.js"></script>
+    <script src="app-grade-questions.js"></script>
+</body>
+</html>
