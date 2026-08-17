@@ -3,12 +3,21 @@
 
 using Pkg
 
-if !haskey(Pkg.project().dependencies, "PackageCompiler")
-    println("Adding PackageCompiler...")
-    Pkg.add("PackageCompiler")
+# Load PackageCompiler from the global/shared environment
+# so it never pollutes Biscuit's Project.toml
+try
+    using PackageCompiler
+catch
+    pushfirst!(LOAD_PATH, "@v#.#")
+    try
+        using PackageCompiler
+    catch
+        println("PackageCompiler not found. Installing into global Julia environment...")
+        Pkg.activate()
+        Pkg.add("PackageCompiler")
+        using PackageCompiler
+    end
 end
-
-using PackageCompiler
 
 const APP_NAME = "Biscuit"
 const BUNDLE_NAME = "$APP_NAME.app"
@@ -164,7 +173,68 @@ open(launcher_script, "w") do f
     export PATH="\$APP_DIR/Resources/bin:\$APP_DIR/app/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:\$HOME/.cargo/bin:\$HOME/.local/bin:\$PATH"
     export DYLD_LIBRARY_PATH="\$APP_DIR/app/lib:\$APP_DIR/Resources/lib:\$DYLD_LIBRARY_PATH"
 
-    exec "\$APP_DIR/app/bin/$APP_NAME" "\$@"
+    # Internal runner mode when invoked inside Terminal.app
+    if [ "\$1" = "--run-server" ]; then
+        shift
+        WORKSPACE="\$1"
+        if [ -n "\$WORKSPACE" ] && [ -d "\$WORKSPACE" ]; then
+            cd "\$WORKSPACE" || exit 1
+        fi
+        echo "============================================================"
+        echo "  Biscuit Assignment Server"
+        echo "  Workspace: \$(pwd)"
+        echo "  URL:       http://127.0.0.1:8080"
+        echo "============================================================"
+        echo ""
+        exec "\$APP_DIR/app/bin/$APP_NAME"
+    fi
+
+    # Interactive CLI mode (when invoked directly from a shell)
+    if [ -t 0 ] || [ -n "\$TERM_PROGRAM" ]; then
+        if [ -n "\$1" ] && [ -d "\$1" ]; then
+            cd "\$1" || exit 1
+        fi
+        exec "\$APP_DIR/app/bin/$APP_NAME" "\$@"
+    fi
+
+    # Finder / GUI double-click mode:
+    # 1. Determine workspace directory (passed argument or folder picker)
+    WORKSPACE="\$1"
+    CONFIG_DIR="\$HOME/.config/biscuit"
+    LAST_WS_FILE="\$CONFIG_DIR/last_workspace.txt"
+    mkdir -p "\$CONFIG_DIR"
+
+    if [ -z "\$WORKSPACE" ] || [ ! -d "\$WORKSPACE" ]; then
+        DEFAULT_OPT=""
+        if [ -f "\$LAST_WS_FILE" ]; then
+            LAST_DIR=\$(cat "\$LAST_WS_FILE")
+            if [ -d "\$LAST_DIR" ]; then
+                DEFAULT_OPT="default location POSIX file \\\"\$LAST_DIR\\\""
+            fi
+        fi
+
+        CHOSEN=\$(osascript -e "try
+            set chosenFolder to choose folder with prompt \\\"Select your Biscuit course workspace folder:\\\" \$DEFAULT_OPT
+            POSIX path of chosenFolder
+        on error
+            return \\\"\\\"
+        end try" 2>/dev/null)
+
+        if [ -z "\$CHOSEN" ]; then
+            exit 0
+        fi
+        WORKSPACE="\$CHOSEN"
+    fi
+
+    # Save last used workspace
+    echo "\$WORKSPACE" > "\$LAST_WS_FILE"
+
+    # 2. Launch in a dedicated Terminal.app window
+    RUNNER_SCRIPT="\$DIR/$APP_NAME"
+    osascript -e "tell application \\\"Terminal\\\"
+        do script \\\"\\\\\\\"\$RUNNER_SCRIPT\\\\\\\" --run-server \\\\\\\"\$WORKSPACE\\\\\\\"\\\"
+        activate
+    end tell" >/dev/null 2>&1
     """)
 end
 chmod(launcher_script, 0o755)
@@ -192,10 +262,25 @@ open(joinpath(contents_dir, "Info.plist"), "w") do f
         <string>0.1.0</string>
         <key>CFBundleVersion</key>
         <string>1</string>
+        <key>LSUIElement</key>
+        <true/>
         <key>NSHighResolutionCapable</key>
         <true/>
         <key>LSMinimumSystemVersion</key>
         <string>11.0</string>
+        <key>CFBundleDocumentTypes</key>
+        <array>
+            <dict>
+                <key>CFBundleTypeName</key>
+                <string>Folder</string>
+                <key>CFBundleTypeRole</key>
+                <string>Viewer</string>
+                <key>LSItemContentTypes</key>
+                <array>
+                    <string>public.folder</string>
+                </array>
+            </dict>
+        </array>
     </dict>
     </plist>
     """)

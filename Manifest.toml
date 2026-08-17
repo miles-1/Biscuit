@@ -123,6 +123,12 @@ version = "0.6.1"
 uuid = "2a0f44e3-6c83-55bd-87e4-b1978d98bd5f"
 version = "1.11.0"
 
+[[deps.Biscuit]]
+deps = ["Base64", "CSV", "Colors", "Dates", "FileIO", "Flux", "HTTP", "Hungarian", "ImageIO", "ImageMorphology", "JSON", "JSON3", "Libdl", "LinearAlgebra", "OpenCV", "Oxygen", "Random", "Serialization", "Sockets", "Statistics", "YAML", "ZipFile"]
+path = "."
+uuid = "3c8ea17f-cb20-4dd8-9331-be30d4796056"
+version = "0.1.0"
+
 [[deps.BitFlags]]
 git-tree-sha1 = "bbe1079eecf9c9fbb52765193ad2bae27ae09bc8"
 uuid = "d1d4a3ce-64b1-5f1a-9ba4-7e7e69966f35"
@@ -347,12 +353,6 @@ deps = ["Artifacts", "JLLWrappers", "Libdl"]
 git-tree-sha1 = "8a4be429317c42cfae6a7fc03c31bad1970c310d"
 uuid = "2702e6a9-849d-5ed8-8c21-79e8b8f9ee43"
 version = "0.0.20230411+1"
-
-[[deps.Biscuit]]
-deps = ["Base64", "CSV", "Colors", "Dates", "FileIO", "Flux", "HTTP", "Hungarian", "ImageIO", "ImageMorphology", "JSON", "JSON3", "Libdl", "LinearAlgebra", "OpenCV", "Oxygen", "Random", "Serialization", "Sockets", "Statistics", "YAML", "ZipFile"]
-path = "."
-uuid = "3c8ea17f-cb20-4dd8-9331-be30d4796056"
-version = "0.1.0"
 
 [[deps.ExceptionUnwrapping]]
 deps = ["Test"]
