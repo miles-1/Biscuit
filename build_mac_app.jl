@@ -80,16 +80,39 @@ PackageCompiler.create_app(
 println("--> Assembling macOS application bundle ($FINAL_APP_DIR)...")
 contents_dir = joinpath(FINAL_APP_DIR, "Contents")
 macos_dir = joinpath(contents_dir, "MacOS")
+lib_dir = joinpath(contents_dir, "lib")
 resources_dir = joinpath(contents_dir, "Resources")
-app_runtime_dir = joinpath(contents_dir, "app")
 
 mkpath(macos_dir)
+mkpath(lib_dir)
 mkpath(resources_dir)
-mkpath(app_runtime_dir)
 
-for item in readdir(RAW_APP_DIR)
-    mv(joinpath(RAW_APP_DIR, item), joinpath(app_runtime_dir, item))
+# Place the compiled binary directly at Contents/MacOS/Biscuit
+raw_bin = joinpath(RAW_APP_DIR, "bin", APP_NAME)
+dest_bin = joinpath(macos_dir, APP_NAME)
+if isfile(raw_bin)
+    cp(raw_bin, dest_bin; force=true)
+    chmod(dest_bin, 0o755)
 end
+
+# Copy Julia runtime libraries and shared assets directly into Contents/
+raw_lib = joinpath(RAW_APP_DIR, "lib")
+if isdir(raw_lib)
+    for item in readdir(raw_lib)
+        cp(joinpath(raw_lib, item), joinpath(lib_dir, item); force=true)
+    end
+end
+
+raw_share = joinpath(RAW_APP_DIR, "share")
+if isdir(raw_share)
+    cp(raw_share, joinpath(contents_dir, "share"); force=true)
+end
+
+raw_artifacts = joinpath(RAW_APP_DIR, "artifacts")
+if isdir(raw_artifacts)
+    cp(raw_artifacts, joinpath(contents_dir, "artifacts"); force=true)
+end
+
 rm(RAW_APP_DIR; force=true, recursive=true)
 
 # Copy static assets into Contents/Resources
@@ -124,17 +147,14 @@ for cand in dmtx_candidates
     end
 end
 if found_dmtx !== nothing
-    app_lib_dir = joinpath(app_runtime_dir, "lib")
     res_lib_dir = joinpath(resources_dir, "lib")
-    mkpath(app_lib_dir)
     mkpath(res_lib_dir)
-    # Copy libdmtx and any matching dylib files
     src_dir = dirname(found_dmtx)
     for f in readdir(src_dir)
         if startswith(f, "libdmtx") && occursin(".dylib", f)
             src_f = joinpath(src_dir, f)
             isfile(src_f) || continue
-            cp(src_f, joinpath(app_lib_dir, f); force=true)
+            cp(src_f, joinpath(lib_dir, f); force=true)
             cp(src_f, joinpath(res_lib_dir, f); force=true)
         end
     end
@@ -162,83 +182,7 @@ if icns_path !== nothing && isfile(icns_path)
     rm(icon_tmp_dir; force=true, recursive=true)
 end
 
-# 5. Create launcher script at Contents/MacOS/Biscuit
-launcher_script = joinpath(macos_dir, APP_NAME)
-open(launcher_script, "w") do f
-    write(f, """
-    #!/bin/bash
-    DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
-    APP_DIR="\$(cd "\$DIR/.." && pwd)"
-
-    # Prepend bundled binaries and dynamic libraries
-    export PATH="\$APP_DIR/Resources/bin:\$APP_DIR/app/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:\$HOME/.cargo/bin:\$HOME/.local/bin:\$PATH"
-    export DYLD_LIBRARY_PATH="\$APP_DIR/app/lib:\$APP_DIR/Resources/lib:\$DYLD_LIBRARY_PATH"
-
-    CONFIG_DIR="\$HOME/.config/biscuit"
-    LAST_WS_FILE="\$CONFIG_DIR/last_workspace.txt"
-    LOG_FILE="\$CONFIG_DIR/biscuit.log"
-    mkdir -p "\$CONFIG_DIR"
-
-    # Log rotation: if biscuit.log > 5MB, keep the last 10,000 lines
-    if [ -f "\$LOG_FILE" ]; then
-        LOG_SIZE=\$(wc -c < "\$LOG_FILE" 2>/dev/null || echo 0)
-        if [ "\$LOG_SIZE" -gt 5242880 ]; then
-            tail -n 10000 "\$LOG_FILE" > "\$LOG_FILE.tmp" && mv "\$LOG_FILE.tmp" "\$LOG_FILE"
-        fi
-    fi
-
-    # Interactive CLI mode (when invoked directly from a terminal shell)
-    if [ -t 0 ] || [ -n "\$TERM_PROGRAM" ]; then
-        if [ -n "\$1" ] && [ -d "\$1" ]; then
-            cd "\$1" || exit 1
-        fi
-        exec "\$APP_DIR/app/bin/$APP_NAME" "\$@"
-    fi
-
-    # Finder / GUI double-click mode:
-    # 1. Determine workspace directory (passed argument, drag-and-drop, or folder picker)
-    WORKSPACE="\$1"
-
-    if [ -z "\$WORKSPACE" ] || [ ! -d "\$WORKSPACE" ]; then
-        DEFAULT_OPT=""
-        if [ -f "\$LAST_WS_FILE" ]; then
-            LAST_DIR=\$(cat "\$LAST_WS_FILE")
-            if [ -d "\$LAST_DIR" ]; then
-                DEFAULT_OPT="default location POSIX file \\\"\$LAST_DIR\\\""
-            fi
-        fi
-
-        CHOSEN=\$(osascript -e "try
-            set chosenFolder to choose folder with prompt \\\"Select your Biscuit course workspace folder:\\\" \$DEFAULT_OPT
-            POSIX path of chosenFolder
-        on error
-            return \\\"\\\"
-        end try" 2>/dev/null)
-
-        if [ -z "\$CHOSEN" ]; then
-            exit 0
-        fi
-        WORKSPACE="\$CHOSEN"
-    fi
-
-    # Save chosen workspace and change directory
-    echo "\$WORKSPACE" > "\$LAST_WS_FILE"
-    cd "\$WORKSPACE" || exit 1
-
-    # Log session startup with formatted timestamp
-    echo "============================================================" >> "\$LOG_FILE"
-    echo "  Biscuit started at \$(date '+%Y-%m-%d %H:%M:%S')" >> "\$LOG_FILE"
-    echo "  Workspace: \$(pwd)" >> "\$LOG_FILE"
-    echo "  URL:       http://127.0.0.1:8080" >> "\$LOG_FILE"
-    echo "============================================================" >> "\$LOG_FILE"
-
-    # Execute backend silently, redirecting output to log file
-    exec "\$APP_DIR/app/bin/$APP_NAME" >> "\$LOG_FILE" 2>&1
-    """)
-end
-chmod(launcher_script, 0o755)
-
-# 6. Create Info.plist
+# 5. Create Info.plist
 open(joinpath(contents_dir, "Info.plist"), "w") do f
     write(f, """
     <?xml version="1.0" encoding="UTF-8"?>
@@ -287,12 +231,12 @@ open(joinpath(contents_dir, "Info.plist"), "w") do f
     """)
 end
 
-# 7. Create PkgInfo
+# 6. Create PkgInfo
 open(joinpath(contents_dir, "PkgInfo"), "w") do f
     write(f, "APPL????")
 end
 
-# 8. Refresh macOS LaunchServices icon & bundle registration
+# 7. Refresh macOS LaunchServices icon & bundle registration
 println("--> Refreshing macOS icon & bundle cache...")
 try
     run(`touch "$FINAL_APP_DIR"`)
@@ -308,11 +252,10 @@ println("""
 ✓ SUCCESS! Standalone Mac App built successfully:
   $FINAL_APP_DIR
 
-- Icon: Set to Biscuit icon (with full Retina resolutions)
-- Dock: Shows in Dock without bouncing
+- Icon: Persistent custom Biscuit icon in Dock & App Switcher
+- Workspace: Native folder selector on launch
 - Web UI: Opens http://127.0.0.1:8080 automatically
-- Workspace: Interactive folder picker on launch (or drag & drop)
-- Logs: Terminal is hidden, logs saved to ~/.config/biscuit/biscuit.log
+- Logs: Silently written to ~/.config/biscuit/biscuit.log (downloadable in UI)
 
 You can double-click Biscuit.app in Finder or move it to /Applications:
   cp -r "$FINAL_APP_DIR" /Applications/

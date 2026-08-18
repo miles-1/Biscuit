@@ -4,6 +4,7 @@ using Oxygen
 using HTTP
 using JSON
 using CSV
+using Dates
 
 using ..ArchiveUtils
 using ..Commands
@@ -56,8 +57,8 @@ include("ServerUtils.jl")
 function _ensure_standard_mac_paths!()
     if Sys.isapple()
         extra_paths = [
-            normpath(joinpath(Sys.BINDIR, "..", "..", "Resources", "bin")),
             normpath(joinpath(Sys.BINDIR, "..", "Resources", "bin")),
+            normpath(joinpath(Sys.BINDIR, "..", "..", "Resources", "bin")),
             normpath(joinpath(Sys.BINDIR, "..", "bin")),
             "/opt/homebrew/bin",
             "/opt/homebrew/sbin",
@@ -101,10 +102,99 @@ function _init_mac_dock_app!()
     end
 end
 
+function _mac_gui_setup!()
+    Sys.isapple() || return
+    _init_mac_dock_app!()
+
+    # If run interactively in a terminal shell, keep standard terminal I/O and pwd()
+    is_interactive = isa(stdin, Base.TTY) || (haskey(ENV, "TERM_PROGRAM") && isinteractive())
+    if is_interactive
+        return
+    end
+
+    # GUI double-click mode:
+    config_d = config_dir()
+    mkpath(config_d)
+    last_ws_file = joinpath(config_d, "last_workspace.txt")
+    log_file = joinpath(config_d, "biscuit.log")
+
+    # 1. Check workspace folder (passed argument, drag-and-drop, or native folder picker)
+    target_workspace = ""
+    for arg in ARGS
+        if isdir(arg)
+            target_workspace = abspath(arg)
+            break
+        end
+    end
+
+    if isempty(target_workspace)
+        default_opt = ""
+        if isfile(last_ws_file)
+            last_dir = strip(read(last_ws_file, String))
+            if isdir(last_dir)
+                default_opt = "default location POSIX file \"$last_dir\""
+            end
+        end
+
+        script = """
+        try
+            set chosenFolder to choose folder with prompt "Select your Biscuit course workspace folder:" $default_opt
+            POSIX path of chosenFolder
+        on error
+            return ""
+        end try
+        """
+        try
+            chosen = strip(read(pipeline(`osascript -e $script`), String))
+            if isempty(chosen)
+                exit(0) # User cancelled folder picker
+            end
+            target_workspace = chosen
+        catch
+            target_workspace = homedir()
+        end
+    end
+
+    if isdir(target_workspace)
+        try; write(last_ws_file, target_workspace); catch; end
+        cd(target_workspace)
+    end
+
+    # 2. Log rotation: keep biscuit.log <= 5 MB
+    try
+        if isfile(log_file) && filesize(log_file) > 5 * 1024 * 1024
+            lines = readlines(log_file)
+            if length(lines) > 5000
+                open(log_file, "w") do f
+                    for l in lines[end-5000:end]
+                        println(f, l)
+                    end
+                end
+            end
+        end
+    catch
+    end
+
+    # 3. Redirect stdout & stderr to biscuit.log
+    try
+        open(log_file, "a") do f
+            println(f, "============================================================")
+            println(f, "  Biscuit started at ", Dates.format(Dates.now(), "yyyy-mm-dd HH:MM:SS"))
+            println(f, "  Workspace: ", pwd())
+            println(f, "  URL:       http://127.0.0.1:8080")
+            println(f, "============================================================")
+        end
+        log_io = open(log_file, "a")
+        redirect_stdout(log_io)
+        redirect_stderr(log_io)
+    catch
+    end
+end
+
 Base.@ccallable function julia_main()::Cint
     _ensure_standard_mac_paths!()
     if Sys.isapple()
-        _init_mac_dock_app!()
+        _mac_gui_setup!()
         @async begin
             sleep(0.8)
             try; run(`open http://127.0.0.1:8080`); catch; end
