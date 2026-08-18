@@ -80,40 +80,24 @@ PackageCompiler.create_app(
 println("--> Assembling macOS application bundle ($FINAL_APP_DIR)...")
 contents_dir = joinpath(FINAL_APP_DIR, "Contents")
 macos_dir = joinpath(contents_dir, "MacOS")
-lib_dir = joinpath(contents_dir, "lib")
 resources_dir = joinpath(contents_dir, "Resources")
+app_runtime_dir = joinpath(contents_dir, "app")
 
 mkpath(macos_dir)
-mkpath(lib_dir)
 mkpath(resources_dir)
+mkpath(app_runtime_dir)
 
-# Place the compiled binary directly at Contents/MacOS/Biscuit
-raw_bin = joinpath(RAW_APP_DIR, "bin", APP_NAME)
-dest_bin = joinpath(macos_dir, APP_NAME)
-if isfile(raw_bin)
-    cp(raw_bin, dest_bin; force=true)
-    chmod(dest_bin, 0o755)
+for item in readdir(RAW_APP_DIR)
+    mv(joinpath(RAW_APP_DIR, item), joinpath(app_runtime_dir, item))
 end
-
-# Copy Julia runtime libraries and shared assets directly into Contents/
-raw_lib = joinpath(RAW_APP_DIR, "lib")
-if isdir(raw_lib)
-    for item in readdir(raw_lib)
-        cp(joinpath(raw_lib, item), joinpath(lib_dir, item); force=true)
-    end
-end
-
-raw_share = joinpath(RAW_APP_DIR, "share")
-if isdir(raw_share)
-    cp(raw_share, joinpath(contents_dir, "share"); force=true)
-end
-
-raw_artifacts = joinpath(RAW_APP_DIR, "artifacts")
-if isdir(raw_artifacts)
-    cp(raw_artifacts, joinpath(contents_dir, "artifacts"); force=true)
-end
-
 rm(RAW_APP_DIR; force=true, recursive=true)
+
+# Compile native Cocoa launcher into Contents/MacOS/Biscuit
+println("--> Compiling native Cocoa App launcher...")
+launcher_src = joinpath(@__DIR__, "src", "macos_launcher.m")
+launcher_dest = joinpath(macos_dir, APP_NAME)
+run(`clang -fmodules -framework Cocoa "$launcher_src" -o "$launcher_dest"`)
+chmod(launcher_dest, 0o755)
 
 # Copy static assets into Contents/Resources
 println("--> Copying non-Julia assets (public/, templates, configs)...")
@@ -147,14 +131,16 @@ for cand in dmtx_candidates
     end
 end
 if found_dmtx !== nothing
+    app_lib_dir = joinpath(app_runtime_dir, "lib")
     res_lib_dir = joinpath(resources_dir, "lib")
+    mkpath(app_lib_dir)
     mkpath(res_lib_dir)
     src_dir = dirname(found_dmtx)
     for f in readdir(src_dir)
         if startswith(f, "libdmtx") && occursin(".dylib", f)
             src_f = joinpath(src_dir, f)
             isfile(src_f) || continue
-            cp(src_f, joinpath(lib_dir, f); force=true)
+            cp(src_f, joinpath(app_lib_dir, f); force=true)
             cp(src_f, joinpath(res_lib_dir, f); force=true)
         end
     end
