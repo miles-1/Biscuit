@@ -1065,6 +1065,28 @@ end
     end
 end
 
+@get "/api/download_log" function(req::HTTP.Request)
+    log_file = joinpath(config_dir(), "biscuit.log")
+    if !isfile(log_file)
+        return HTTP.Response(404, [
+            "Content-Type" => "text/plain; charset=utf-8",
+        ], "Log file not found at $log_file")
+    end
+    try
+        content = read(log_file)
+        headers = [
+            "Content-Type" => "text/plain; charset=utf-8",
+            "Content-Disposition" => "attachment; filename=\"biscuit.log\"",
+            "Cache-Control" => "no-cache",
+        ]
+        return HTTP.Response(200, headers, content)
+    catch e
+        return HTTP.Response(500, [
+            "Content-Type" => "text/plain; charset=utf-8",
+        ], "Failed to read log file: $(sprint(showerror, e))")
+    end
+end
+
 staticfiles(joinpath(package_root(), "public"), "/")
 
 # Oxygen maps public/index.html to an empty route when mounted at "/", which does not

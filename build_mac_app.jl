@@ -179,6 +179,14 @@ open(launcher_script, "w") do f
     LOG_FILE="\$CONFIG_DIR/biscuit.log"
     mkdir -p "\$CONFIG_DIR"
 
+    # Log rotation: if biscuit.log > 5MB, keep the last 10,000 lines
+    if [ -f "\$LOG_FILE" ]; then
+        LOG_SIZE=\$(wc -c < "\$LOG_FILE" 2>/dev/null || echo 0)
+        if [ "\$LOG_SIZE" -gt 5242880 ]; then
+            tail -n 10000 "\$LOG_FILE" > "\$LOG_FILE.tmp" && mv "\$LOG_FILE.tmp" "\$LOG_FILE"
+        fi
+    fi
+
     # Interactive CLI mode (when invoked directly from a terminal shell)
     if [ -t 0 ] || [ -n "\$TERM_PROGRAM" ]; then
         if [ -n "\$1" ] && [ -d "\$1" ]; then
@@ -217,9 +225,9 @@ open(launcher_script, "w") do f
     echo "\$WORKSPACE" > "\$LAST_WS_FILE"
     cd "\$WORKSPACE" || exit 1
 
-    # Log session startup
+    # Log session startup with formatted timestamp
     echo "============================================================" >> "\$LOG_FILE"
-    echo "  Biscuit started at \$(date)" >> "\$LOG_FILE"
+    echo "  Biscuit started at \$(date '+%Y-%m-%d %H:%M:%S')" >> "\$LOG_FILE"
     echo "  Workspace: \$(pwd)" >> "\$LOG_FILE"
     echo "  URL:       http://127.0.0.1:8080" >> "\$LOG_FILE"
     echo "============================================================" >> "\$LOG_FILE"

@@ -25,6 +25,10 @@ function closeClassesModal() {
     refreshClassSelect();
 }
 
+function downloadLog() {
+    window.location.href = '/api/download_log';
+}
+
 function setClassesStatus(message, isError = false) {
     const el = document.getElementById('classes-modal-status');
     if (!el) return;

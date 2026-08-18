@@ -12,7 +12,7 @@ using ..Classes
 using ..GenerateAssnFiles
 using ..ProcessScans
 using ..NameReader
-using ..Paths: package_root, resolve_under_workspace
+using ..Paths: package_root, resolve_under_workspace, config_dir
 
 export serve, serveparallel, terminate, julia_main
 
@@ -75,14 +75,36 @@ function _ensure_standard_mac_paths!()
     end
 end
 
+function _init_mac_dock_app!()
+    Sys.isapple() || return
+    try
+        # 1. Load AppKit framework
+        ccall((:NSApplicationLoad, "/System/Library/Frameworks/AppKit.framework/AppKit"), Cint, ())
+
+        # 2. Get shared NSApplication instance
+        cls_NSApp = ccall(:objc_getClass, Ptr{Cvoid}, (Cstring,), "NSApplication")
+        sel_shared = ccall(:sel_registerName, Ptr{Cvoid}, (Cstring,), "sharedApplication")
+        app = ccall(:objc_msgSend, Ptr{Cvoid}, (Ptr{Cvoid}, Ptr{Cvoid}), cls_NSApp, sel_shared)
+
+        # 3. Set activation policy to Regular (0 = NSApplicationActivationPolicyRegular)
+        # Keeps the Biscuit icon in the Dock with an active indicator dot & in Cmd+Tab switcher
+        sel_setPolicy = ccall(:sel_registerName, Ptr{Cvoid}, (Cstring,), "setActivationPolicy:")
+        ccall(:objc_msgSend, Cvoid, (Ptr{Cvoid}, Ptr{Cvoid}, Clong), app, sel_setPolicy, 0)
+
+        # 4. Finish launching and activate
+        sel_finish = ccall(:sel_registerName, Ptr{Cvoid}, (Cstring,), "finishLaunching")
+        ccall(:objc_msgSend, Cvoid, (Ptr{Cvoid}, Ptr{Cvoid}), app, sel_finish)
+
+        sel_activate = ccall(:sel_registerName, Ptr{Cvoid}, (Cstring,), "activateIgnoringOtherApps:")
+        ccall(:objc_msgSend, Cvoid, (Ptr{Cvoid}, Ptr{Cvoid}, Bool), app, sel_activate, true)
+    catch
+    end
+end
+
 Base.@ccallable function julia_main()::Cint
     _ensure_standard_mac_paths!()
     if Sys.isapple()
-        try
-            # Initialize AppKit to check in with WindowServer and stop Dock bounce
-            ccall((:NSApplicationLoad, "/System/Library/Frameworks/AppKit.framework/AppKit"), Cint, ())
-        catch
-        end
+        _init_mac_dock_app!()
         @async begin
             sleep(0.8)
             try; run(`open http://127.0.0.1:8080`); catch; end
