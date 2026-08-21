@@ -74,7 +74,7 @@
             <span id="gen-master-check" class="input-status-icon success hidden">✔</span>
             <span id="gen-master-cross" class="input-status-icon error hidden">✕</span>
         </div>
-        <button type="button" onclick="openMasterBuilder()">Create New</button>
+        <button type="button" id="gen-master-builder-btn" onclick="openOrEditMasterBuilder()">Create New</button>
         <button type="button" onclick="pickFile('gen-master-path', ['.json'])">Browse</button><br>
         <div id="gen-master-validation-msg" class="master-validation-msg"></div><br>
         <label>New File Name (without extension):</label><br>

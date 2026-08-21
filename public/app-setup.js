@@ -652,7 +652,27 @@ selectAllOnFirstClick(document.getElementById('nr-output-name'));
 let masterValidationDebounceTimer = null;
 let masterValidationSeq = 0;
 
+function syncMasterBuilderButton(mode) {
+    const btn = document.getElementById('gen-master-builder-btn');
+    if (!btn) return;
+    btn.textContent = mode === 'edit' ? 'Edit' : 'Create New';
+}
+
 function validateMasterPathDebounced() {
+    const input = document.getElementById('gen-master-path');
+    const spinner = document.getElementById('gen-master-spinner');
+    const check = document.getElementById('gen-master-check');
+    const cross = document.getElementById('gen-master-cross');
+    const msg = document.getElementById('gen-master-validation-msg');
+    if (input) input.classList.remove('is-valid', 'is-invalid');
+    if (spinner) spinner.classList.add('hidden');
+    if (check) check.classList.add('hidden');
+    if (cross) cross.classList.add('hidden');
+    if (msg) {
+        msg.textContent = '';
+        msg.className = 'master-validation-msg';
+    }
+    syncMasterBuilderButton('create');
     clearTimeout(masterValidationDebounceTimer);
     masterValidationDebounceTimer = setTimeout(() => {
         validateMasterPath();
@@ -676,6 +696,7 @@ async function validateMasterPath() {
         input.classList.remove('is-valid', 'is-invalid');
         msg.textContent = '';
         msg.className = 'master-validation-msg';
+        syncMasterBuilderButton('create');
         return;
     }
 
@@ -686,6 +707,7 @@ async function validateMasterPath() {
     input.classList.remove('is-valid', 'is-invalid');
     msg.textContent = '';
     msg.className = 'master-validation-msg';
+    syncMasterBuilderButton('create');
 
     try {
         const res = await fetch('/api/validate_master_json', {
@@ -705,6 +727,7 @@ async function validateMasterPath() {
             input.classList.remove('is-invalid');
             msg.textContent = 'master .json validated';
             msg.className = 'master-validation-msg success';
+            syncMasterBuilderButton('edit');
         } else {
             check.classList.add('hidden');
             cross.classList.remove('hidden');
@@ -712,6 +735,7 @@ async function validateMasterPath() {
             input.classList.remove('is-valid');
             msg.textContent = data.message || 'Validation failed.';
             msg.className = 'master-validation-msg error';
+            syncMasterBuilderButton('create');
         }
     } catch (e) {
         if (currentSeq !== masterValidationSeq) return;
@@ -722,6 +746,38 @@ async function validateMasterPath() {
         input.classList.remove('is-valid');
         msg.textContent = 'Failed to connect to server: ' + (e.message || String(e));
         msg.className = 'master-validation-msg error';
+        syncMasterBuilderButton('create');
+    }
+}
+
+async function openOrEditMasterBuilder() {
+    const input = document.getElementById('gen-master-path');
+    const path = (input?.value || '').trim();
+    const validated = !!(input && input.classList.contains('is-valid'));
+    if (!(path && validated)) {
+        openMasterBuilder();
+        return;
+    }
+    try {
+        const res = await fetch('/api/load_master_json', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path: path }),
+        });
+        const data = await res.json();
+        if (!res.ok || data.status !== 'success') {
+            showMessageModal({
+                title: 'Failed to Load JSON',
+                message: data.message || 'Could not load master JSON file.',
+            });
+            return;
+        }
+        openMasterBuilder(data.master, data.path);
+    } catch (e) {
+        showMessageModal({
+            title: 'Error',
+            message: 'Failed to load file: ' + (e.message || String(e)),
+        });
     }
 }
 

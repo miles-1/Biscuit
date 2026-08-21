@@ -51,13 +51,18 @@ function _roster_cell(value)
     return isempty(s) ? missing : String(s)
 end
 
+function _is_test_student_name(name::AbstractString)::Bool
+    return lowercase(strip(String(name))) == "student, test"
+end
+
 function _resolve_roster_header(namemap::Dict, canonical::AbstractString)::Union{Nothing, Symbol}
     return get(namemap, lowercase(canonical), nothing)
 end
 
 """
 Read a roster CSV into a NamedTuple of columns using Canvas headers (`Student`, optional `ID`
-and `Email`). Drops a Canvas "Points Possible" row if present.
+and `Email`). Drops a Canvas "Points Possible" row if present, and drops a trailing
+`Student, Test` row if present.
 """
 function read_roster_table(source_path::AbstractString)::NamedTuple
     isfile(source_path) || throw(ArgumentError("CSV file not found: $source_path"))
@@ -93,6 +98,12 @@ function read_roster_table(source_path::AbstractString)::NamedTuple
         end
     end
 
+    if !isempty(student_vals) && _is_test_student_name(student_vals[end])
+        pop!(student_vals)
+        id_vals !== nothing && pop!(id_vals)
+        email_vals !== nothing && pop!(email_vals)
+    end
+
     cols = Pair{Symbol, Any}[:Student => student_vals]
     id_vals !== nothing && push!(cols, :ID => id_vals)
     email_vals !== nothing && push!(cols, :Email => email_vals)
@@ -104,7 +115,8 @@ roster_has_email(table)::Bool = table !== nothing && haskey(table, :Email)
 
 """
 Read a user-provided roster CSV, require `Student`, keep only Student/ID/Email, drop a
-Canvas "Points Possible" row if present, and write it to `dest_path`.
+Canvas "Points Possible" row and a trailing `Student, Test` row if present, and write it
+to `dest_path`.
 """
 function write_sanitized_roster_csv(source_path::AbstractString, dest_path::AbstractString)
     table = read_roster_table(source_path)
