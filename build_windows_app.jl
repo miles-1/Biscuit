@@ -1,5 +1,6 @@
 # build_windows_app.jl
-# Automated script to build a standalone, system-tray Biscuit app for Windows.
+# Automated script to build a standalone, double-clickable Biscuit app for Windows.
+# Run this on a Windows machine (PackageCompiler does not cross-compile).
 
 using Pkg
 
@@ -20,6 +21,7 @@ catch
 end
 
 const APP_NAME = "Biscuit"
+const BACKEND_NAME = "biscuit-server"
 const BUILD_DIR = joinpath(@__DIR__, "build")
 const RAW_APP_DIR = joinpath(BUILD_DIR, "$(APP_NAME)_raw")
 const FINAL_APP_DIR = joinpath(BUILD_DIR, APP_NAME)
@@ -31,11 +33,11 @@ rm(RAW_APP_DIR; force=true, recursive=true)
 rm(FINAL_APP_DIR; force=true, recursive=true)
 mkpath(BUILD_DIR)
 
-# 2. Precompile and build the standalone app binary with PackageCompiler
+# 2. Precompile and build the standalone backend binary with PackageCompiler
 println("--> Running PackageCompiler (compiling sysimage and C runtime)...")
 workload_file = joinpath(@__DIR__, "precompile_workload.jl")
 create_app_kwargs = Dict{Symbol, Any}(
-    :executables => [APP_NAME => "julia_main"],
+    :executables => [BACKEND_NAME => "julia_main"],
     :force => true,
     :include_lazy_artifacts => true,
 )
@@ -79,7 +81,7 @@ if isdir(bg_images_dir)
     cp(bg_images_dir, joinpath(resources_dir, "background_training_images"); force=true)
 end
 
-# Copy icon
+# Copy icon (used as the launcher / console / taskbar icon)
 ico_source = joinpath(@__DIR__, "public", "favicon.ico")
 ico_dest = joinpath(resources_dir, "Biscuit.ico")
 if isfile(ico_source)
@@ -92,6 +94,7 @@ dmtx_candidates = [
     joinpath(dirname(Sys.BINDIR), "lib", "libdmtx.dll"),
     joinpath(dirname(Sys.BINDIR), "bin", "libdmtx.dll"),
     "C:\\Program Files\\libdmtx\\libdmtx.dll",
+    "C:\\msys64\\mingw64\\bin\\libdmtx.dll",
 ]
 found_dmtx = nothing
 for cand in dmtx_candidates
@@ -99,6 +102,10 @@ for cand in dmtx_candidates
         global found_dmtx = cand
         break
     end
+end
+which_dmtx = Sys.which("libdmtx.dll")
+if found_dmtx === nothing && which_dmtx !== nothing && isfile(which_dmtx)
+    found_dmtx = which_dmtx
 end
 if found_dmtx !== nothing
     app_lib_dir = joinpath(app_runtime_dir, "lib")
@@ -108,6 +115,8 @@ if found_dmtx !== nothing
     cp(found_dmtx, joinpath(app_lib_dir, basename(found_dmtx)); force=true)
     cp(found_dmtx, joinpath(res_lib_dir, basename(found_dmtx)); force=true)
     println("    ✓ Bundled libdmtx from $found_dmtx")
+else
+    @warn "libdmtx.dll not found; Process Scans will fail until it is installed and rebundled."
 end
 
 # Bundle local typst.exe if present
@@ -119,18 +128,20 @@ if typst_bin !== nothing && isfile(typst_bin)
     dest_typst = joinpath(res_bin_dir, "typst.exe")
     cp(typst_bin, dest_typst; force=true)
     println("    ✓ Bundled typst from $typst_bin")
+else
+    @warn "typst.exe not found in PATH; assignment PDF generation will fail until it is installed and rebundled."
 end
 
-# 5. Compile Windows System Tray Launcher (using built-in csc.exe)
-println("--> Compiling native Windows System Tray Launcher (Biscuit.exe)...")
+# 5. Compile Windows launcher (folder picker + minimized console + browser)
+println("--> Compiling native Windows launcher (Biscuit.exe)...")
 launcher_src = joinpath(@__DIR__, "src", "windows_launcher.cs")
 launcher_dest = joinpath(FINAL_APP_DIR, "$APP_NAME.exe")
 
-# Locate C# compiler (pre-installed on all Windows versions)
+windir = get(ENV, "WINDIR", "C:\\Windows")
 csc_candidates = [
     Sys.which("csc"),
-    "C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe",
-    "C:\\Windows\\Microsoft.NET\\Framework\\v4.0.30319\\csc.exe",
+    joinpath(windir, "Microsoft.NET", "Framework64", "v4.0.30319", "csc.exe"),
+    joinpath(windir, "Microsoft.NET", "Framework", "v4.0.30319", "csc.exe"),
 ]
 found_csc = nothing
 for cand in csc_candidates
@@ -141,12 +152,20 @@ for cand in csc_candidates
 end
 
 if found_csc !== nothing
-    icon_arg = isfile(ico_dest) ? "/win32icon:\"$ico_dest\"" : ""
-    compile_cmd = `$found_csc /target:winexe /optimize+ /r:System.Net.Http.dll $icon_arg /out:"$launcher_dest" "$launcher_src"`
+    icon_args = isfile(ico_dest) ? ["/win32icon:$ico_dest"] : String[]
+    compile_cmd = Cmd([
+        found_csc,
+        "/nologo",
+        "/target:winexe",
+        "/optimize+",
+        icon_args...,
+        "/out:$launcher_dest",
+        launcher_src,
+    ])
     run(compile_cmd)
     println("    ✓ Compiled Biscuit.exe using $found_csc")
 else
-    @warn "csc.exe (C# compiler) not found. Please compile src/windows_launcher.cs manually."
+    @warn "csc.exe (C# compiler) not found. Install .NET Framework 4.x or add csc.exe to PATH, then re-run."
 end
 
 println("""
@@ -156,13 +175,15 @@ println("""
 
 Directory Layout:
   $FINAL_APP_DIR/
-    Biscuit.exe          <- Double-click this to run (System Tray App)
-    Resources/           <- Web frontend & assets
-    app/                 <- Backend runtime
+    Biscuit.exe          <- Double-click this to run
+    Resources/           <- Web frontend, icon, bundled typst/libdmtx
+    app/                 <- Julia backend runtime (biscuit-server.exe)
 
-Features:
-- System Tray: Runs quietly in the notification area next to the clock
-- Menu: Right-click icon for Web UI, Course Workspace, Logs, or Exit
-- Browser: Opens http://127.0.0.1:8080 automatically when ready
+Behavior:
+- Folder picker on launch (remembers the last workspace)
+- Backend console uses the Biscuit icon, starts minimized
+- Browser opens http://127.0.0.1:8080 once the server is ready
+- Restore the taskbar icon to see backend logs; close it to stop the server
+- Logs are also written to %USERPROFILE%\\.config\\biscuit\\biscuit.log
 ============================================================
 """)

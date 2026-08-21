@@ -13,8 +13,11 @@ export delete_class
 export reveal_path_in_file_manager
 export sanitize_class_name
 export write_sanitized_roster_csv
+export read_roster_table
+export roster_has_id
+export roster_has_email
 
-const ALLOWED_ROSTER_COLUMNS = ("students", "student_id", "student_email")
+const ROSTER_COLUMNS = ("Student", "ID", "Email")
 
 function classes_dir()::String
     return joinpath(config_dir(), "classes")
@@ -37,38 +40,103 @@ function ensure_classes_dir()
     return nothing
 end
 
+function _is_points_possible_cell(value)::Bool
+    (ismissing(value) || value === nothing) && return false
+    return lowercase(strip(string(value))) == "points possible"
+end
+
+function _roster_cell(value)
+    (ismissing(value) || value === nothing) && return missing
+    s = strip(string(value))
+    return isempty(s) ? missing : String(s)
+end
+
+function _resolve_roster_header(namemap::Dict, canonical::AbstractString)::Union{Nothing, Symbol}
+    return get(namemap, lowercase(canonical), nothing)
+end
+
 """
-Read a user-provided roster CSV, require `students`, keep only students/student_id/student_email,
-and write it to `dest_path`.
+Read a roster CSV into a NamedTuple of columns using Canvas headers (`Student`, optional `ID`
+and `Email`). Drops a Canvas "Points Possible" row if present.
 """
-function write_sanitized_roster_csv(source_path::AbstractString, dest_path::AbstractString)
+function read_roster_table(source_path::AbstractString)::NamedTuple
     isfile(source_path) || throw(ArgumentError("CSV file not found: $source_path"))
     table = CSV.File(source_path)
     namemap = Dict(lowercase(String(n)) => n for n in propertynames(table))
-    haskey(namemap, "students") || throw(ArgumentError(
-        "Roster CSV must include a `students` column."
+    resolved = Dict{String, Symbol}()
+    for col in ROSTER_COLUMNS
+        src = _resolve_roster_header(namemap, col)
+        src === nothing || (resolved[col] = src)
+    end
+    haskey(resolved, "Student") || throw(ArgumentError(
+        "Roster CSV must include a `Student` column."
     ))
-    out_header = Symbol[]
-    for col in ALLOWED_ROSTER_COLUMNS
-        if haskey(namemap, col)
-            push!(out_header, Symbol(col))
+
+    student_vals = String[]
+    id_vals = haskey(resolved, "ID") ? Vector{Any}() : nothing
+    email_vals = haskey(resolved, "Email") ? Vector{Any}() : nothing
+    student_src = resolved["Student"]
+    id_src = get(resolved, "ID", nothing)
+    email_src = get(resolved, "Email", nothing)
+
+    for row in table
+        raw_name = row[student_src]
+        _is_points_possible_cell(raw_name) && continue
+        name = _roster_cell(raw_name)
+        name === missing && continue
+        push!(student_vals, String(name))
+        if id_vals !== nothing
+            push!(id_vals, _roster_cell(row[id_src]))
+        end
+        if email_vals !== nothing
+            push!(email_vals, _roster_cell(row[email_src]))
         end
     end
-    rows = NamedTuple[]
-    hdr = Tuple(out_header)
-    for row in table
-        vals = ntuple(i -> row[namemap[String(out_header[i])]], length(out_header))
-        push!(rows, NamedTuple{hdr}(vals))
-    end
+
+    cols = Pair{Symbol, Any}[:Student => student_vals]
+    id_vals !== nothing && push!(cols, :ID => id_vals)
+    email_vals !== nothing && push!(cols, :Email => email_vals)
+    return NamedTuple(cols)
+end
+
+roster_has_id(table)::Bool = table !== nothing && haskey(table, :ID)
+roster_has_email(table)::Bool = table !== nothing && haskey(table, :Email)
+
+"""
+Read a user-provided roster CSV, require `Student`, keep only Student/ID/Email, drop a
+Canvas "Points Possible" row if present, and write it to `dest_path`.
+"""
+function write_sanitized_roster_csv(source_path::AbstractString, dest_path::AbstractString)
+    table = read_roster_table(source_path)
     mkpath(dirname(dest_path))
-    CSV.write(dest_path, rows)
+    n = length(table.Student)
+    headers = String["Student"]
+    roster_has_id(table) && push!(headers, "ID")
+    roster_has_email(table) && push!(headers, "Email")
+    col_syms = Tuple(Symbol.(headers))
+    rows = [
+        NamedTuple{col_syms}(Tuple(
+            h == "Student" ? table.Student[i] :
+            h == "ID" ? table.ID[i] :
+            table.Email[i]
+            for h in headers
+        ))
+        for i in 1:n
+    ]
+    if isempty(rows)
+        open(dest_path, "w") do io
+            println(io, join(headers, ","))
+        end
+    else
+        CSV.write(dest_path, rows)
+    end
     return dest_path
 end
 
 function _class_info_from_path(path::String)::Dict{String, Any}
     class_name = first(splitext(basename(path)))
     table = try
-        CSV.File(path; header=1)
+        read_roster_table(path)
     catch
         return Dict(
             "class_name" => class_name,
@@ -80,13 +148,12 @@ function _class_info_from_path(path::String)::Dict{String, Any}
             "error" => "Could not read CSV",
         )
     end
-    names_lower = Set(lowercase.(String.(propertynames(table))))
     return Dict(
         "class_name" => class_name,
         "path" => abspath(path),
-        "num_students" => length(table),
-        "has_student_id" => "student_id" in names_lower,
-        "has_student_email" => "student_email" in names_lower,
+        "num_students" => length(table.Student),
+        "has_student_id" => roster_has_id(table),
+        "has_student_email" => roster_has_email(table),
         "last_edited" => string(Dates.unix2datetime(mtime(path))),
     )
 end

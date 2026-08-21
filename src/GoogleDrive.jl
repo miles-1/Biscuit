@@ -7,6 +7,7 @@ using Random
 using Sockets
 
 using ..Paths: package_root, config_dir
+using ..Classes: roster_has_email
 
 export google_drive_credentials_linked
 export google_drive_client_available
@@ -78,7 +79,7 @@ function display_student_name(name::AbstractString)::String
 end
 
 function students_table_has_email(students_table)::Bool
-    return students_table !== nothing && haskey(students_table, :student_email)
+    return roster_has_email(students_table)
 end
 
 function _cell_string(value)::Union{String, Nothing}
@@ -538,18 +539,18 @@ end
 
 """
 Look up roster name + email by matching a sanitized PDF stem against roster CSV names.
-Requires a `student_email` column.
+Requires an `Email` column.
 
 Returns a NamedTuple with `status` one of:
 - `:ok` — `name` and `email` set
-- `:no_email` — name matched but `student_email` empty; `name` set
+- `:no_email` — name matched but `Email` empty; `name` set
 - `:no_match` — no roster name matched the PDF stem
 """
 function find_student_for_pdf_stem(students_table, pdf_stem::String)
-    if !students_table_has_email(students_table) || !haskey(students_table, :students)
+    if !students_table_has_email(students_table) || !haskey(students_table, :Student)
         return (status=:no_match, name=nothing, email=nothing)
     end
-    for (name, email) in zip(students_table.students, students_table.student_email)
+    for (name, email) in zip(students_table.Student, students_table.Email)
         name_str = String(name)
         if sanitize_student_name(name_str) == pdf_stem
             email_str = _cell_string(email)
@@ -687,7 +688,7 @@ function preview_drive_upload_conflicts(
     google_drive_credentials_linked(token_path) ||
         throw(ArgumentError("Google Drive credentials file not found: $token_path"))
     students_table_has_email(students_table) ||
-        throw(ArgumentError("Class roster CSV must include a `student_email` column for Google Drive upload"))
+        throw(ArgumentError("Class roster CSV must include an `Email` column for Google Drive upload"))
     isempty(strip(class_name)) && throw(ArgumentError("`class_name` is required for Google Drive upload"))
 
     access_token = get_access_token(token_path)
@@ -758,7 +759,7 @@ function upload_feedback_pdfs(
     google_drive_credentials_linked(token_path) ||
         throw(ArgumentError("Google Drive credentials file not found: $token_path"))
     students_table_has_email(students_table) ||
-        throw(ArgumentError("Class roster CSV must include a `student_email` column for Google Drive upload"))
+        throw(ArgumentError("Class roster CSV must include an `Email` column for Google Drive upload"))
     isempty(strip(class_name)) && throw(ArgumentError("`class_name` is required for Google Drive upload"))
 
     access_token = get_access_token(token_path)

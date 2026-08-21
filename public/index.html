@@ -440,6 +440,9 @@
                 <input type="text" id="new-class-csv-path" readonly placeholder="No file selected">
                 <button type="button" onclick="pickNewClassCsvNative()">Browse</button>
                 <button type="button" id="new-class-add-btn" onclick="addNewClass()">Add Class</button>
+                <p class="classes-modal-status" style="margin-top: 8px;">
+                    Needs a <code>Student</code> column. Optional: <code>ID</code> (Canvas grades) and <code>Email</code> (Google Drive feedback). Extra Canvas columns are ignored.
+                </p>
             </div>
             <div class="modal-actions">
                 <button type="button" id="classes-modal-done">Done</button>

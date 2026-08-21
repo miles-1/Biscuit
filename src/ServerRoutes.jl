@@ -1,3 +1,6 @@
+function _register_routes!()
+    _ROUTES_REGISTERED[] && return
+
 @websocket "/api/ws_generate" function(ws)
     for msg in ws
         data = JSON.parse(String(msg))
@@ -272,12 +275,12 @@ end
         return Dict("status" => "success", "students" => String[], "class_name" => nothing)
     end
     nt = roster.table
-    if !haskey(nt, :students)
-        return Dict("status" => "error", "message" => "Class roster CSV is missing a `students` column")
+    if !haskey(nt, :Student)
+        return Dict("status" => "error", "message" => "Class roster CSV is missing a `Student` column")
     end
     return Dict(
         "status" => "success",
-        "students" => String.(nt.students),
+        "students" => String.(nt.Student),
         "class_name" => roster.class_name,
     )
 end
@@ -638,7 +641,7 @@ end
     if !roster_present
         push!(missing, "No class roster CSV is in this assignment archive (select a class when creating the assignment).")
     elseif !has_student_email
-        push!(missing, "Class roster CSV is missing a `student_email` column.")
+        push!(missing, "Class roster CSV is missing an `Email` column.")
     end
     return Dict(
         "status" => "success",
@@ -697,16 +700,16 @@ function _drive_upload_context(feedback_dir::AbstractString)
         )
     end
     students = roster.table
-    if !haskey(students, :students)
+    if !haskey(students, :Student)
         return Dict(
             "status" => "error",
-            "message" => "Class roster CSV must include a `students` column",
+            "message" => "Class roster CSV must include a `Student` column",
         )
     end
     if !students_table_has_email(students)
         return Dict(
             "status" => "error",
-            "message" => "Class roster CSV must include a `student_email` column for Google Drive upload",
+            "message" => "Class roster CSV must include an `Email` column for Google Drive upload",
         )
     end
     assn_name = first(splitext(basename(archive_path)))
@@ -1093,4 +1096,8 @@ staticfiles(joinpath(package_root(), "public"), "/")
 # match GET /. Register the homepage explicitly.
 @get "/" function()
     file(joinpath(package_root(), "public", "index.html"))
+end
+
+    _ROUTES_REGISTERED[] = true
+    return
 end

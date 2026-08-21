@@ -6,6 +6,7 @@ export decode_matrix
 
 function _find_libdmtx()::String
     search_dirs = String[
+        String(Sys.BINDIR),
         normpath(joinpath(Sys.BINDIR, "..", "lib")),
         normpath(joinpath(Sys.BINDIR, "..", "Resources", "lib")),
         normpath(joinpath(Sys.BINDIR, "..", "..", "Resources", "lib")),
@@ -17,9 +18,10 @@ function _find_libdmtx()::String
     ]
     search_dirs = filter(isdir, search_dirs)
 
-    found = Libdl.find_library(["libdmtx", "dmtx"], search_dirs)
+    found = Libdl.find_library(["libdmtx", "dmtx", "libdmtx-0"], search_dirs)
     isempty(found) && error(
         "libdmtx not found. Install it (macOS: `brew install libdmtx`; " *
+        "Windows: place libdmtx.dll next to the app or in Resources/lib; " *
         "Debian/Ubuntu: `sudo apt install libdmtx0t64`) and retry."
     )
     return found

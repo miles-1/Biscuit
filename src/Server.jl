@@ -54,30 +54,56 @@ end
 
 include("ServerUtils.jl")
 
-function _ensure_standard_mac_paths!()
+function _ensure_bundled_paths!()
+    extra_bins = [
+        normpath(joinpath(Sys.BINDIR, "..", "Resources", "bin")),
+        normpath(joinpath(Sys.BINDIR, "..", "..", "Resources", "bin")),
+        normpath(joinpath(Sys.BINDIR, "..", "bin")),
+    ]
+    extra_libs = [
+        normpath(joinpath(Sys.BINDIR, "..", "lib")),
+        normpath(joinpath(Sys.BINDIR, "..", "Resources", "lib")),
+        normpath(joinpath(Sys.BINDIR, "..", "..", "Resources", "lib")),
+    ]
     if Sys.isapple()
-        extra_paths = [
-            normpath(joinpath(Sys.BINDIR, "..", "Resources", "bin")),
-            normpath(joinpath(Sys.BINDIR, "..", "..", "Resources", "bin")),
-            normpath(joinpath(Sys.BINDIR, "..", "bin")),
+        append!(extra_bins, [
             "/opt/homebrew/bin",
             "/opt/homebrew/sbin",
             "/usr/local/bin",
             joinpath(homedir(), ".cargo", "bin"),
             joinpath(homedir(), ".local", "bin"),
-        ]
-        curr_path = get(ENV, "PATH", "")
-        for p in extra_paths
+        ])
+    end
+
+    sep = Sys.iswindows() ? ";" : ":"
+    curr_path = get(ENV, "PATH", "")
+    for p in extra_bins
+        if isdir(p) && !occursin(p, curr_path)
+            curr_path = p * sep * curr_path
+        end
+    end
+    if Sys.iswindows()
+        for p in extra_libs
             if isdir(p) && !occursin(p, curr_path)
-                curr_path = p * ":" * curr_path
+                curr_path = p * sep * curr_path
             end
         end
-        ENV["PATH"] = curr_path
+    elseif Sys.isapple()
+        curr_dyld = get(ENV, "DYLD_LIBRARY_PATH", "")
+        for p in extra_libs
+            if isdir(p) && !occursin(p, curr_dyld)
+                curr_dyld = isempty(curr_dyld) ? p : p * ":" * curr_dyld
+            end
+        end
+        ENV["DYLD_LIBRARY_PATH"] = curr_dyld
     end
+    ENV["PATH"] = curr_path
 end
 
 Base.@ccallable function julia_main()::Cint
-    _ensure_standard_mac_paths!()
+    _ensure_bundled_paths!()
+    println("Biscuit starting on http://127.0.0.1:8080")
+    flush(stdout)
     try
         serve(host="127.0.0.1", port=8080)
     catch
@@ -88,17 +114,14 @@ Base.@ccallable function julia_main()::Cint
 end
 
 
-# Oxygen route macros mutate Oxygen's global router. That must happen at runtime: during
-# package precompilation those mutations are discarded, which left GET / (and every API
-# route) returning 404 after `using Biscuit`.
+# Oxygen's router is global process state: it does not survive package
+# precompilation, so routes must be *registered* at runtime. The handler
+# functions themselves live in `_register_routes!` (see ServerRoutes.jl),
+# which is compiled into the PackageCompiler sysimage. A runtime `include`
+# of that file would re-parse and re-JIT every route on each launch.
 const _ROUTES_REGISTERED = Ref(false)
 
-function _register_routes!()
-    _ROUTES_REGISTERED[] && return
-    include(joinpath(@__DIR__, "ServerRoutes.jl"))
-    _ROUTES_REGISTERED[] = true
-    return
-end
+include("ServerRoutes.jl")
 
 """
     serve(; host="127.0.0.1", port=8080, kwargs...)

@@ -142,7 +142,7 @@ function _read_roster_from_temp(; give_default::Bool=false)
         give_default && return nothing
         error("Expected a class roster CSV in the archive, none found")
     end
-    return (path=path, class_name=roster_class_name_from_path(path), table=CSV.read(path, NamedTuple))
+    return (path=path, class_name=roster_class_name_from_path(path), table=read_roster_table(path))
 end
 
 function _score_from_answer(
@@ -468,6 +468,71 @@ function _entry_total_points(entry::Dict)::Union{Float64, Missing}
     return has_any ? total : missing
 end
 
+function _assignment_max_points(master::Dict)::Union{Float64, Missing}
+    total = 0.0
+    has_any = false
+    for mq in _flatten_master_questions_export(get(master, "questions", Any[]))
+        pts = get(mq, "points", nothing)
+        if isa(pts, Number)
+            total += Float64(pts)
+            has_any = true
+        end
+    end
+    return has_any ? total : missing
+end
+
+function _csv_field(value)::String
+    (value === missing || value === nothing) && return ""
+    s = string(value)
+    if occursin(r"[\",\n\r]", s) || startswith(s, " ") || endswith(s, " ")
+        return "\"" * replace(s, "\"" => "\"\"") * "\""
+    end
+    return s
+end
+
+function _csv_number_field(value)::String
+    (value === missing || value === nothing) && return ""
+    if isa(value, Integer)
+        return string(value)
+    elseif isa(value, AbstractFloat) && isfinite(value) && isinteger(value)
+        return string(Int64(value))
+    end
+    return string(value)
+end
+
+const ASSIGNMENT_SCORES_HEADER = "Assignment Scores"
+const POINTS_POSSIBLE_CELL = "    Points Possible"
+
+# Canvas-style non-detailed scores CSV: Student, optional ID, Assignment Scores,
+# plus a "    Points Possible" row under the header. Email is never included.
+function _write_canvas_scores_csv(
+    path::String,
+    rows::Vector{Dict{String, Any}},
+    has_id::Bool,
+    max_points::Union{Float64, Missing},
+)::Nothing
+    headers = has_id ? String["Student", "ID", ASSIGNMENT_SCORES_HEADER] : String["Student", ASSIGNMENT_SCORES_HEADER]
+    open(path, "w") do io
+        println(io, join(headers, ","))
+        max_cell = _csv_number_field(max_points)
+        if has_id
+            println(io, POINTS_POSSIBLE_CELL * ",," * max_cell)
+        else
+            println(io, POINTS_POSSIBLE_CELL * "," * max_cell)
+        end
+        for row in rows
+            name_cell = _csv_field(get(row, "Student", missing))
+            score_cell = _csv_number_field(get(row, ASSIGNMENT_SCORES_HEADER, missing))
+            if has_id
+                println(io, join((name_cell, _csv_field(get(row, "ID", missing)), score_cell), ","))
+            else
+                println(io, join((name_cell, score_cell), ","))
+            end
+        end
+    end
+    return nothing
+end
+
 function _write_csv_rows(path::String, headers::Vector{String}, rows::Vector{Dict{String, Any}})::Nothing
     col_syms = Tuple(Symbol(h) for h in headers)
     if isempty(rows)
@@ -501,7 +566,7 @@ function export_score_csvs(;
     master_qs = _flatten_master_questions_export(get(master, "questions", Any[]))
 
     # --- detailed CSV ---
-    detailed_headers = String["students", "assn_id"]
+    detailed_headers = String["Student", "assn_id"]
     col_specs = Any[]
     for mq in master_qs
         qid = string(mq["id"])
@@ -547,7 +612,7 @@ function export_score_csvs(;
             isa(q, Dict) && haskey(q, "id") || continue
             q_by_id[string(q["id"])] = q
         end
-        row = Dict{String, Any}("students" => name, "assn_id" => assn_id)
+        row = Dict{String, Any}("Student" => name, "assn_id" => assn_id)
         for spec in col_specs
             q = get(q_by_id, spec.qid, nothing)
             if spec.kind === :answer
@@ -576,39 +641,41 @@ function export_score_csvs(;
     end
 
     scores_rows = Dict{String, Any}[]
-    has_student_id = !isnothing(students_table) && haskey(students_table, :student_id)
-    if !isnothing(students_table) && haskey(students_table, :students)
-        roster_names = string.(students_table.students)
-        roster_ids = has_student_id ? string.(students_table.student_id) : nothing
+    has_id = roster_has_id(students_table)
+    if !isnothing(students_table) && haskey(students_table, :Student)
+        roster_names = string.(students_table.Student)
+        roster_ids = has_id ? students_table.ID : nothing
         used = Set{String}()
         for (i, rname) in enumerate(roster_names)
             haskey(named_totals, rname) || continue
             push!(used, rname)
-            row = Dict{String, Any}("students" => rname, stem => named_totals[rname])
-            if has_student_id
-                row["student_id"] = roster_ids[i]
+            row = Dict{String, Any}("Student" => rname, ASSIGNMENT_SCORES_HEADER => named_totals[rname])
+            if has_id
+                row["ID"] = roster_ids[i]
             end
             push!(scores_rows, row)
         end
         for name in sort(collect(keys(named_totals)); by=lowercase)
             name in used && continue
-            row = Dict{String, Any}("students" => name, stem => named_totals[name])
-            if has_student_id
-                row["student_id"] = missing
+            row = Dict{String, Any}("Student" => name, ASSIGNMENT_SCORES_HEADER => named_totals[name])
+            if has_id
+                row["ID"] = missing
             end
             push!(scores_rows, row)
         end
     else
         for name in sort(collect(keys(named_totals)); by=lowercase)
-            push!(scores_rows, Dict{String, Any}("students" => name, stem => named_totals[name]))
+            push!(scores_rows, Dict{String, Any}("Student" => name, ASSIGNMENT_SCORES_HEADER => named_totals[name]))
         end
     end
 
-    scores_headers = has_student_id ? String["students", "student_id", stem] : String["students", stem]
-    # Keep roster-matched rows first (submission order from CSV), then extras already appended.
-    # Re-sort only the extras portion is already done; optionally sort all alphabetically:
-    sort!(scores_rows; by = r -> lowercase(string(r["students"])))
-    _write_csv_rows(scores_path, scores_headers, scores_rows)
+    sort!(scores_rows; by = r -> lowercase(string(r["Student"])))
+    _write_canvas_scores_csv(
+        scores_path,
+        scores_rows,
+        has_id,
+        _assignment_max_points(master),
+    )
 
     return (detailed_path, scores_path)
 end

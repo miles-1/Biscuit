@@ -1,34 +1,55 @@
 using System;
 using System.IO;
+using System.Net;
 using System.Diagnostics;
-using System.Drawing;
-using System.Windows.Forms;
-using System.Net.Http;
-using System.Threading.Tasks;
+using System.Runtime.InteropServices;
+using System.Threading;
 
 namespace BiscuitLauncher
 {
     static class Program
     {
-        private static NotifyIcon trayIcon;
-        private static Process serverProcess;
-        private static string workspacePath;
-        private static string configDir;
-        private static string logFile;
-        private static string appDir;
+        const int SW_HIDE = 0;
+        const int SW_SHOWMINIMIZED = 2;
+        const uint WM_SETICON = 0x0080;
+        const int ICON_SMALL = 0;
+        const int ICON_BIG = 1;
+        const uint IMAGE_ICON = 1;
+        const uint LR_LOADFROMFILE = 0x0010;
+        const uint LR_DEFAULTSIZE = 0x0040;
+        const uint MB_ICONERROR = 0x00000010;
+        const int CTRL_C_EVENT = 0;
+        const int CTRL_BREAK_EVENT = 1;
+        const int CTRL_CLOSE_EVENT = 2;
+        const int CTRL_LOGOFF_EVENT = 5;
+        const int CTRL_SHUTDOWN_EVENT = 6;
+        const uint FOS_PICKFOLDERS = 0x20;
+        const uint FOS_FORCEFILESYSTEM = 0x40;
+        const uint FOS_PATHMUSTEXIST = 0x800;
+        const uint SIGDN_FILESYSPATH = 0x80058000;
+
+        static Process serverProcess;
+        static string workspacePath;
+        static string logFile;
+        static string appDir;
+        static ConsoleCtrlHandler ctrlHandler;
+
+        delegate bool ConsoleCtrlHandler(int ctrlType);
 
         [STAThread]
         static void Main(string[] args)
         {
-            Application.EnableVisualStyles();
-            Application.SetCompatibleTextRenderingDefault(false);
+            try
+            {
+                SetCurrentProcessExplicitAppUserModelID("com.biscuit.app");
+            }
+            catch { }
 
             appDir = AppDomain.CurrentDomain.BaseDirectory;
             string homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-            configDir = Path.Combine(homeDir, ".config", "biscuit");
+            string configDir = Path.Combine(homeDir, ".config", "biscuit");
             string lastWsFile = Path.Combine(configDir, "last_workspace.txt");
             logFile = Path.Combine(configDir, "biscuit.log");
-
             Directory.CreateDirectory(configDir);
 
             if (args.Length > 0 && Directory.Exists(args[0]))
@@ -43,77 +64,104 @@ namespace BiscuitLauncher
                     try { lastDir = File.ReadAllText(lastWsFile).Trim(); } catch { }
                 }
 
-                using (FolderBrowserDialog fbd = new FolderBrowserDialog())
-                {
-                    fbd.Description = "Select your Biscuit course workspace folder:";
-                    fbd.ShowNewFolderButton = true;
-                    if (!string.IsNullOrEmpty(lastDir) && Directory.Exists(lastDir))
-                    {
-                        fbd.SelectedPath = lastDir;
-                    }
-
-                    if (fbd.ShowDialog() == DialogResult.OK && !string.IsNullOrEmpty(fbd.SelectedPath))
-                    {
-                        workspacePath = fbd.SelectedPath;
-                    }
-                    else
-                    {
-                        return;
-                    }
-                }
+                workspacePath = PickFolder("Select your Biscuit course workspace folder", lastDir);
+                if (string.IsNullOrEmpty(workspacePath) || !Directory.Exists(workspacePath))
+                    return;
             }
 
             try { File.WriteAllText(lastWsFile, workspacePath); } catch { }
 
-            SetupTrayIcon();
-        static void SetupTrayIcon()
-        {
-            trayIcon = new NotifyIcon();
-            trayIcon.Text = "Biscuit Assignment Server";
-
-            string icoPath = Path.Combine(appDir, "Resources", "Biscuit.ico");
-            if (!File.Exists(icoPath))
-                icoPath = Path.Combine(appDir, "Resources", "public", "favicon.ico");
-
-            if (File.Exists(icoPath))
+            if (!AllocConsole())
             {
-                try { trayIcon.Icon = new Icon(icoPath); } catch { trayIcon.Icon = SystemIcons.Application; }
-            }
-            else
-            {
-                trayIcon.Icon = SystemIcons.Application;
-            }
-
-            ContextMenuStrip menu = new ContextMenuStrip();
-            ToolStripMenuItem itemOpenUi = new ToolStripMenuItem("Open Biscuit Web UI", null, (s, e) => OpenWebUi());
-            itemOpenUi.Font = new Font(itemOpenUi.Font, FontStyle.Bold);
-
-            ToolStripMenuItem itemOpenWorkspace = new ToolStripMenuItem("Open Course Workspace Folder", null, (s, e) => OpenWorkspaceFolder());
-            ToolStripMenuItem itemViewLogs = new ToolStripMenuItem("View Server Logs", null, (s, e) => ViewLogs());
-            ToolStripSeparator sep = new ToolStripSeparator();
-            ToolStripMenuItem itemExit = new ToolStripMenuItem("Exit Biscuit", null, (s, e) => ExitApplication());
-
-            menu.Items.Add(itemOpenUi);
-            menu.Items.Add(itemOpenWorkspace);
-            menu.Items.Add(itemViewLogs);
-            menu.Items.Add(sep);
-            menu.Items.Add(itemExit);
-
-            trayIcon.ContextMenuStrip = menu;
-            trayIcon.DoubleClick += (s, e) => OpenWebUi();
-            trayIcon.Visible = true;
-        }
-
-        static void StartServerProcess()
-        {
-            string backendExe = Path.Combine(appDir, "app", "bin", "Biscuit.exe");
-            if (!File.Exists(backendExe))
-            {
-                MessageBox.Show("Biscuit backend executable not found at:\n" + backendExe, "Biscuit Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                ExitApplication();
+                NativeMessageBox("Could not create the Biscuit server console window.", "Biscuit Error");
                 return;
             }
 
+            try { Console.Title = "Biscuit"; } catch { }
+            ApplyConsoleIcon();
+            ctrlHandler = OnConsoleCtrl;
+            SetConsoleCtrlHandler(ctrlHandler, true);
+
+            RotateLogIfNeeded();
+            WriteLogHeader();
+            WriteBanner();
+
+            IntPtr hwnd = GetConsoleWindow();
+            if (hwnd != IntPtr.Zero)
+                ShowWindow(hwnd, SW_SHOWMINIMIZED);
+
+            if (!StartServerProcess())
+                return;
+
+            Thread pollThread = new Thread(PollServerAndOpenBrowser);
+            pollThread.IsBackground = true;
+            pollThread.Start();
+
+            try { serverProcess.WaitForExit(); }
+            catch { }
+        }
+
+        static string PickFolder(string title, string initialPath)
+        {
+            IFileDialog dialog = null;
+            try
+            {
+                dialog = (IFileDialog)new FileOpenDialog();
+                dialog.SetTitle(title);
+                dialog.SetOptions(FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST);
+                try
+                {
+                    if (!string.IsNullOrEmpty(initialPath) && Directory.Exists(initialPath))
+                    {
+                        IShellItem folder;
+                        if (SHCreateItemFromParsingName(initialPath, IntPtr.Zero, typeof(IShellItem).GUID, out folder) == 0)
+                            dialog.SetFolder(folder);
+                    }
+                }
+                catch { }
+                uint hr = dialog.Show(GetActiveWindow());
+                if (hr != 0)
+                    return null;
+                IShellItem result;
+                dialog.GetResult(out result);
+                string path;
+                result.GetDisplayName(SIGDN_FILESYSPATH, out path);
+                return path;
+            }
+            catch
+            {
+                NativeMessageBox("Could not open the folder picker.", "Biscuit Error");
+                return null;
+            }
+            finally
+            {
+                if (dialog != null)
+                    Marshal.ReleaseComObject(dialog);
+            }
+        }
+
+        static void ApplyConsoleIcon()
+        {
+            string icoPath = Path.Combine(appDir, "Resources", "Biscuit.ico");
+            if (!File.Exists(icoPath))
+                icoPath = Path.Combine(appDir, "Resources", "public", "favicon.ico");
+            if (!File.Exists(icoPath))
+                return;
+
+            IntPtr hwnd = GetConsoleWindow();
+            if (hwnd == IntPtr.Zero)
+                return;
+
+            IntPtr icon = LoadImage(IntPtr.Zero, icoPath, IMAGE_ICON, 0, 0, LR_LOADFROMFILE | LR_DEFAULTSIZE);
+            if (icon == IntPtr.Zero)
+                return;
+
+            SendMessage(hwnd, WM_SETICON, new IntPtr(ICON_SMALL), icon);
+            SendMessage(hwnd, WM_SETICON, new IntPtr(ICON_BIG), icon);
+        }
+
+        static void RotateLogIfNeeded()
+        {
             try
             {
                 if (File.Exists(logFile) && new FileInfo(logFile).Length > 5 * 1024 * 1024)
@@ -128,13 +176,41 @@ namespace BiscuitLauncher
                 }
             }
             catch { }
+        }
 
+        static void WriteLogHeader()
+        {
+            string header = string.Format(
+                "\r\n============================================================\r\n  Biscuit started at {0:yyyy-MM-dd HH:mm:ss}\r\n  Workspace: {1}\r\n  URL:       http://127.0.0.1:8080\r\n============================================================\r\n",
+                DateTime.Now, workspacePath);
+            try { File.AppendAllText(logFile, header); } catch { }
+        }
+
+        static void WriteBanner()
+        {
             try
             {
-                string header = string.Format("\r\n============================================================\r\n  Biscuit started at {0:yyyy-MM-dd HH:mm:ss}\r\n  Workspace: {1}\r\n  URL:       http://127.0.0.1:8080\r\n============================================================\r\n", DateTime.Now, workspacePath);
-                File.AppendAllText(logFile, header);
+                Console.WriteLine("============================================================");
+                Console.WriteLine("  Biscuit");
+                Console.WriteLine("  Workspace: " + workspacePath);
+                Console.WriteLine("  URL:       http://127.0.0.1:8080");
+                Console.WriteLine("  Close this window to stop the server.");
+                Console.WriteLine("============================================================");
+                Console.WriteLine("Starting backend...");
             }
             catch { }
+        }
+
+        static bool StartServerProcess()
+        {
+            string backendExe = Path.Combine(appDir, "app", "bin", "biscuit-server.exe");
+            if (!File.Exists(backendExe))
+                backendExe = Path.Combine(appDir, "app", "bin", "Biscuit.exe");
+            if (!File.Exists(backendExe))
+            {
+                NativeMessageBox("Biscuit backend executable not found at:\n" + backendExe, "Biscuit Error");
+                return false;
+            }
 
             ProcessStartInfo psi = new ProcessStartInfo();
             psi.FileName = backendExe;
@@ -143,115 +219,196 @@ namespace BiscuitLauncher
             psi.CreateNoWindow = true;
             psi.RedirectStandardOutput = true;
             psi.RedirectStandardError = true;
+            psi.RedirectStandardInput = true;
 
             string resBin = Path.Combine(appDir, "Resources", "bin");
             string appBin = Path.Combine(appDir, "app", "bin");
+            string appLib = Path.Combine(appDir, "app", "lib");
+            string resLib = Path.Combine(appDir, "Resources", "lib");
             string currentPath = Environment.GetEnvironmentVariable("PATH") ?? "";
-            psi.EnvironmentVariables["PATH"] = resBin + ";" + appBin + ";" + currentPath;
+            psi.EnvironmentVariables["PATH"] = resBin + ";" + appBin + ";" + appLib + ";" + resLib + ";" + currentPath;
 
             serverProcess = new Process();
             serverProcess.StartInfo = psi;
-
-            serverProcess.OutputDataReceived += (s, e) =>
-            {
-                if (!string.IsNullOrEmpty(e.Data))
-                {
-                    try { File.AppendAllText(logFile, e.Data + "\r\n"); } catch { }
-                }
-            };
-            serverProcess.ErrorDataReceived += (s, e) =>
-            {
-                if (!string.IsNullOrEmpty(e.Data))
-                {
-                    try { File.AppendAllText(logFile, e.Data + "\r\n"); } catch { }
-                }
-            };
+            serverProcess.EnableRaisingEvents = true;
+            serverProcess.OutputDataReceived += (s, e) => TeeLine(e.Data);
+            serverProcess.ErrorDataReceived += (s, e) => TeeLine(e.Data);
 
             try
             {
                 serverProcess.Start();
                 serverProcess.BeginOutputReadLine();
                 serverProcess.BeginErrorReadLine();
+                return true;
             }
             catch (Exception ex)
             {
-                MessageBox.Show("Failed to launch Biscuit backend:\n" + ex.Message, "Biscuit Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                ExitApplication();
+                NativeMessageBox("Failed to launch Biscuit backend:\n" + ex.Message, "Biscuit Error");
+                return false;
             }
         }
 
-        static async void PollServerAndOpenBrowser()
+        static void TeeLine(string line)
+        {
+            if (string.IsNullOrEmpty(line))
+                return;
+            try { Console.WriteLine(line); } catch { }
+            try { File.AppendAllText(logFile, line + "\r\n"); } catch { }
+        }
+
+        static void PollServerAndOpenBrowser()
         {
             string url = "http://127.0.0.1:8080/";
-            using (HttpClient client = new HttpClient())
+            for (int i = 0; i < 300; i++)
             {
-                client.Timeout = TimeSpan.FromMilliseconds(400);
-                for (int i = 0; i < 300; i++)
+                if (serverProcess == null || serverProcess.HasExited)
+                    return;
+                try
                 {
-                    if (serverProcess == null || serverProcess.HasExited)
-                        break;
-
-                    try
+                    HttpWebRequest req = (HttpWebRequest)WebRequest.Create(url);
+                    req.Method = "GET";
+                    req.Timeout = 400;
+                    req.ReadWriteTimeout = 400;
+                    using (HttpWebResponse resp = (HttpWebResponse)req.GetResponse())
                     {
-                        HttpResponseMessage resp = await client.GetAsync(url);
-                        if ((int)resp.StatusCode >= 200 && (int)resp.StatusCode < 500)
+                        int code = (int)resp.StatusCode;
+                        if (code >= 200 && code < 500)
                         {
                             OpenWebUi();
-                            if (trayIcon != null)
-                            {
-                                trayIcon.ShowBalloonTip(3000, "Biscuit Ready", "Running on http://127.0.0.1:8080", ToolTipIcon.Info);
-                            }
-                            break;
+                            return;
                         }
                     }
-                    catch { }
-
-                    await Task.Delay(200);
                 }
+                catch (WebException ex)
+                {
+                    HttpWebResponse resp = ex.Response as HttpWebResponse;
+                    if (resp != null && (int)resp.StatusCode < 500)
+                    {
+                        OpenWebUi();
+                        return;
+                    }
+                }
+                catch { }
+                Thread.Sleep(200);
             }
         }
 
         static void OpenWebUi()
         {
-            try { Process.Start(new ProcessStartInfo("http://127.0.0.1:8080") { UseShellExecute = true }); } catch { }
+            try
+            {
+                Process.Start(new ProcessStartInfo("http://127.0.0.1:8080") { UseShellExecute = true });
+            }
+            catch { }
         }
 
-        static void OpenWorkspaceFolder()
+        static bool OnConsoleCtrl(int ctrlType)
         {
-            if (!string.IsNullOrEmpty(workspacePath) && Directory.Exists(workspacePath))
+            if (ctrlType == CTRL_C_EVENT || ctrlType == CTRL_BREAK_EVENT ||
+                ctrlType == CTRL_CLOSE_EVENT || ctrlType == CTRL_LOGOFF_EVENT ||
+                ctrlType == CTRL_SHUTDOWN_EVENT)
             {
-                try { Process.Start(new ProcessStartInfo("explorer.exe", workspacePath) { UseShellExecute = true }); } catch { }
+                KillServer();
             }
+            return false;
         }
 
-        static void ViewLogs()
+        static void KillServer()
         {
-            if (File.Exists(logFile))
+            if (serverProcess == null || serverProcess.HasExited)
+                return;
+            try
             {
-                try { Process.Start(new ProcessStartInfo("notepad.exe", logFile) { UseShellExecute = true }); } catch { }
+                serverProcess.Kill();
+                serverProcess.WaitForExit(3000);
             }
+            catch { }
         }
 
-        static void ExitApplication()
+        static void NativeMessageBox(string text, string caption)
         {
-            if (serverProcess != null && !serverProcess.HasExited)
-            {
-                try
-                {
-                    serverProcess.Kill();
-                    serverProcess.WaitForExit(3000);
-                }
-                catch { }
-            }
+            MessageBoxW(IntPtr.Zero, text, caption, MB_ICONERROR);
+        }
 
-            if (trayIcon != null)
-            {
-                trayIcon.Visible = false;
-                trayIcon.Dispose();
-            }
+        [DllImport("kernel32.dll", SetLastError = true)]
+        static extern bool AllocConsole();
 
-            Application.Exit();
-            Environment.Exit(0);
+        [DllImport("kernel32.dll")]
+        static extern IntPtr GetConsoleWindow();
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        static extern bool SetConsoleCtrlHandler(ConsoleCtrlHandler handler, bool add);
+
+        [DllImport("user32.dll")]
+        static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+        [DllImport("user32.dll")]
+        static extern IntPtr GetActiveWindow();
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        static extern int MessageBoxW(IntPtr hWnd, string text, string caption, uint type);
+
+        [DllImport("user32.dll")]
+        static extern IntPtr SendMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        static extern IntPtr LoadImage(IntPtr hInst, string name, uint type, int cx, int cy, uint fuLoad);
+
+        [DllImport("shell32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        static extern void SetCurrentProcessExplicitAppUserModelID(string appID);
+
+        [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)]
+        static extern int SHCreateItemFromParsingName(
+            [MarshalAs(UnmanagedType.LPWStr)] string pszPath,
+            IntPtr pbc,
+            [MarshalAs(UnmanagedType.LPStruct)] Guid riid,
+            out IShellItem ppv);
+
+        [ComImport]
+        [Guid("DC1C5A9C-E88A-4dde-A5A1-60F82A20AEF7")]
+        class FileOpenDialog { }
+
+        [ComImport]
+        [Guid("42f85136-db7e-439c-85f1-e4075f512fcb")]
+        [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+        interface IFileDialog
+        {
+            [PreserveSig] uint Show(IntPtr parent);
+            void SetFileTypes();
+            void SetFileTypeIndex(uint iFileType);
+            void GetFileTypeIndex(out uint piFileType);
+            void Advise();
+            void Unadvise();
+            void SetOptions(uint fos);
+            void GetOptions(out uint pfos);
+            void SetDefaultFolder(IShellItem psi);
+            void SetFolder(IShellItem psi);
+            void GetFolder(out IShellItem ppsi);
+            void GetCurrentSelection(out IShellItem ppsi);
+            void SetFileName([MarshalAs(UnmanagedType.LPWStr)] string pszName);
+            void GetFileName([MarshalAs(UnmanagedType.LPWStr)] out string pszName);
+            void SetTitle([MarshalAs(UnmanagedType.LPWStr)] string pszTitle);
+            void SetOkButtonLabel([MarshalAs(UnmanagedType.LPWStr)] string pszText);
+            void SetFileNameLabel([MarshalAs(UnmanagedType.LPWStr)] string pszLabel);
+            void GetResult(out IShellItem ppsi);
+            void AddPlace(IShellItem psi, int alignment);
+            void SetDefaultExtension([MarshalAs(UnmanagedType.LPWStr)] string pszDefaultExtension);
+            void Close(int hr);
+            void SetClientGuid();
+            void ClearClientData();
+            void SetFilter(IntPtr pFilter);
+        }
+
+        [ComImport]
+        [Guid("43826D1E-E718-42EE-BC55-A1E261C37BFE")]
+        [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+        interface IShellItem
+        {
+            void BindToHandler();
+            void GetParent();
+            void GetDisplayName(uint sigdnName, [MarshalAs(UnmanagedType.LPWStr)] out string ppszName);
+            void GetAttributes();
+            void Compare();
         }
     }
 }

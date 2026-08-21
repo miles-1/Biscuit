@@ -2,11 +2,11 @@ module ProcessScans
 
 import OpenCV as cv
 using Base64: base64decode
-using CSV
 using JSON
 using ..ArchiveUtils
 using ..Dmtx: decode_matrix
 using ..NameReader: load_name_reader, guess_assignment_names
+using ..Classes: read_roster_table
 
 export process_scans, export_name_training_data, extract_name_field_crops
 
@@ -918,9 +918,13 @@ end
 function _archive_roster_names(archive_dir::String)::Union{Nothing, Vector{String}}
     csvs = filter(name -> endswith(lowercase(name), ".csv") && !startswith(name, "."), readdir(archive_dir))
     length(csvs) == 1 || return nothing
-    table = CSV.read(joinpath(archive_dir, only(csvs)), NamedTuple)
-    haskey(table, :students) || return nothing
-    names = String.(table.students)
+    table = try
+        read_roster_table(joinpath(archive_dir, only(csvs)))
+    catch
+        return nothing
+    end
+    haskey(table, :Student) || return nothing
+    names = String.(table.Student)
     return isempty(names) ? nothing : names
 end
 
