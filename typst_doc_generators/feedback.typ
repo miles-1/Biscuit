@@ -57,7 +57,7 @@
         ]
       ))
       if has_feedback or has_manual_answer {
-        let notes = if has_manual_answer [_Note: the computer detected answer was_ #format_answer(q.answer). _After review, grader overrode this answer to be_ #format_answer(q.manual_answer, backup:q.answer). #if has_feedback {linebreak()}] + if has_feedback {q.feedback}
+        let notes = if has_manual_answer [_Note: the computer detected that you answered_ #format_answer(q.answer). _After review, the grader determined that this was incorrect, and changed your answer to be marked as_ #format_answer(q.manual_answer, backup:q.answer). #if has_feedback {linebreak()}] + if has_feedback {q.feedback}
         question_notes.push([
           *Question #q.id* (p.#q.page) \ 
           #notes

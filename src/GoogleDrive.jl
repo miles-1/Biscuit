@@ -359,13 +359,14 @@ end
 """
 Shares a folder or file with a specific email address.
 `role` can be "reader", "commenter", or "writer".
+Does not email the recipient unless `send_email` is true.
 """
 function share_item(
     headers::Vector{Pair{String, String}},
     file_or_folder_id::String,
     target_email::String;
     role::String="reader",
-    send_email::Bool=true,
+    send_email::Bool=false,
 )
     url = "https://www.googleapis.com/drive/v3/files/$(file_or_folder_id)/permissions?sendNotificationEmail=$(send_email)&supportsAllDrives=true"
     body = Dict(
