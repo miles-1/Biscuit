@@ -501,17 +501,22 @@ end
     try
         grading_data = _read_file_from_temp("grading_data.json"; give_default=true)
         master = _read_file_from_temp("master.json")
-        students_table = try
+        students_table = nothing
+        class_name = nothing
+        try
             r = _read_roster_from_temp(; give_default=true)
-            r === nothing ? nothing : r.table
+            if r !== nothing
+                students_table = r.table
+                class_name = r.class_name
+            end
         catch
-            nothing
         end
         detailed_path, scores_path = export_score_csvs(;
             grading_data,
             master,
             students_table,
             archive_path,
+            class_name,
         )
         return Dict(
             "status" => "success",

@@ -20,6 +20,7 @@ export authorize_google_drive
 export process_and_upload_pdf
 export preview_drive_upload_conflicts
 export upload_feedback_pdfs
+export lookup_student_drive_folder_urls
 
 # Master JSON `assn_type` values, mapped to Drive folder names.
 const ASSN_TYPES = Set(["quiz", "worksheet", "exam"])
@@ -451,6 +452,66 @@ end
 
 function student_feedback_folder_name(class_name::AbstractString, student_roster_name::AbstractString)::String
     return "$(strip(String(class_name))) Assignment Feedback - $(display_student_name(student_roster_name))"
+end
+
+function _list_child_folders(
+    headers::Vector{Pair{String, String}},
+    parent_id::String,
+)::Dict{String, String}
+    name_to_id = Dict{String, String}()
+    page_token = nothing
+    while true
+        query = Dict{String, String}(
+            "q" => "'$(parent_id)' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false",
+            "pageSize" => "1000",
+            "fields" => "nextPageToken,files(id,name)",
+        )
+        page_token !== nothing && (query["pageToken"] = String(page_token))
+        body = JSON.parse(String(_drive_list(headers, query).body))
+        for f in get(body, "files", [])
+            haskey(f, "name") && haskey(f, "id") || continue
+            name_to_id[String(f["name"])] = String(f["id"])
+        end
+        nxt = get(body, "nextPageToken", nothing)
+        (nxt === nothing || nxt == "") && break
+        page_token = nxt
+    end
+    return name_to_id
+end
+
+"""
+Look up existing per-student feedback folders under `Biscuit / class_name`.
+Does not create folders. Returns a map of roster name => Drive folder URL.
+"""
+function lookup_student_drive_folder_urls(
+    class_name::Union{Nothing, AbstractString},
+    student_names,
+)::Dict{String, String}
+    urls = Dict{String, String}()
+    class_name === nothing && return urls
+    cname = strip(String(class_name))
+    isempty(cname) && return urls
+    google_drive_credentials_linked() || return urls
+    names = unique(filter(!isempty, String.(student_names)))
+    isempty(names) && return urls
+    try
+        access_token = get_access_token(google_drive_token_path())
+        headers = ["Authorization" => "Bearer $access_token"]
+        biscuit_id = get_folder_id(headers, "Biscuit")
+        biscuit_id === nothing && return urls
+        class_id = get_folder_id(headers, cname; parent_id=biscuit_id)
+        class_id === nothing && return urls
+        children = _list_child_folders(headers, class_id)
+        for name in names
+            folder = student_feedback_folder_name(cname, name)
+            id = get(children, folder, nothing)
+            id === nothing && continue
+            urls[name] = "https://drive.google.com/drive/folders/$(id)"
+        end
+    catch
+        return Dict{String, String}()
+    end
+    return urls
 end
 
 function find_file_in_folder(

@@ -557,6 +557,7 @@ function export_score_csvs(;
     master::Dict,
     students_table::Union{Nothing,NamedTuple},
     archive_path::String,
+    class_name::Union{Nothing, AbstractString}=nothing,
 )::Tuple{String, String}
     stem = first(splitext(basename(archive_path)))
     out_dir = dirname(archive_path)
@@ -566,30 +567,29 @@ function export_score_csvs(;
     master_qs = _flatten_master_questions_export(get(master, "questions", Any[]))
 
     # --- detailed CSV ---
-    detailed_headers = String["Student", "assn_id"]
     col_specs = Any[]
+    question_headers = String[]
     for mq in master_qs
         qid = string(mq["id"])
         q_type = string(get(mq, "type", ""))
         has_points = haskey(mq, "points")
         if q_type == "multiple_choice" || q_type == "true_false"
             ah = _answer_column_header(mq)
-            push!(detailed_headers, ah)
+            push!(question_headers, ah)
             push!(col_specs, (kind=:answer, qid=qid, header=ah, q_type=q_type))
             if has_points
                 sh = "$qid - score"
-                push!(detailed_headers, sh)
+                push!(question_headers, sh)
                 push!(col_specs, (kind=:score, qid=qid, header=sh, q_type=q_type))
             end
         elseif q_type == "essay" || q_type == "fill_blank"
             if has_points
                 sh = "$qid - score"
-                push!(detailed_headers, sh)
+                push!(question_headers, sh)
                 push!(col_specs, (kind=:score, qid=qid, header=sh, q_type=q_type))
             end
         end
     end
-    push!(detailed_headers, "total")
 
     detailed_entries = Tuple{String, Int64, Dict}[]  # (name, assn_id, entry)
     for (assn_key, entry) in pairs(grading_data)
@@ -605,6 +605,30 @@ function export_score_csvs(;
     end
     sort!(detailed_entries; by = x -> (lowercase(x[1]), x[2]))
 
+    email_by_name = Dict{String, String}()
+    if roster_has_email(students_table) && haskey(students_table, :Student)
+        for (rname, email) in zip(students_table.Student, students_table.Email)
+            (ismissing(email) || email === nothing) && continue
+            es = strip(string(email))
+            isempty(es) && continue
+            email_by_name[string(rname)] = es
+        end
+    end
+    has_email = !isempty(email_by_name)
+
+    drive_urls = lookup_student_drive_folder_urls(
+        class_name,
+        (name for (name, _, _) in detailed_entries),
+    )
+    has_drive = !isempty(drive_urls)
+
+    detailed_headers = String["Student"]
+    has_email && push!(detailed_headers, "Email")
+    has_drive && push!(detailed_headers, "Google Drive")
+    push!(detailed_headers, "assn_id")
+    append!(detailed_headers, question_headers)
+    push!(detailed_headers, "total")
+
     detailed_rows = Dict{String, Any}[]
     for (name, assn_id, entry) in detailed_entries
         q_by_id = Dict{String, Dict}()
@@ -613,6 +637,12 @@ function export_score_csvs(;
             q_by_id[string(q["id"])] = q
         end
         row = Dict{String, Any}("Student" => name, "assn_id" => assn_id)
+        if has_email
+            row["Email"] = get(email_by_name, name, missing)
+        end
+        if has_drive
+            row["Google Drive"] = get(drive_urls, name, missing)
+        end
         for spec in col_specs
             q = get(q_by_id, spec.qid, nothing)
             if spec.kind === :answer

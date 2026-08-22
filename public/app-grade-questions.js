@@ -1272,7 +1272,9 @@ function startDriveUploadWithPolicy(duplicatePolicy) {
         if (sawDone) {
             try { ws.close(1000, "Run complete"); } catch (e) { /* ignore */ }
             if (summaryPayload && summaryPayload.status === "success") {
-                showDriveUploadSummary(summaryPayload);
+                refreshDetailedCsvAfterDriveUpload().finally(() => {
+                    showDriveUploadSummary(summaryPayload);
+                });
             } else {
                 setExportModalContent({
                     title: "Upload Failed",
@@ -1290,6 +1292,18 @@ function startDriveUploadWithPolicy(duplicatePolicy) {
     ws.onclose = () => {
         // Summary handling is done when Done is received.
     };
+}
+
+async function refreshDetailedCsvAfterDriveUpload() {
+    try {
+        const csvRes = await fetch('/api/export_csv', { method: 'POST' });
+        let csvData = {};
+        try { csvData = await csvRes.json(); } catch (e) { /* ignore */ }
+        if (csvRes.ok && csvData.status === "success") {
+            exportModalState.detailedCsvPath = csvData.detailed_csv_path || exportModalState.detailedCsvPath;
+            exportModalState.scoresCsvPath = csvData.scores_csv_path || exportModalState.scoresCsvPath;
+        }
+    } catch (e) { /* keep the CSV written before upload */ }
 }
 
 function showDriveUploadSummary(data) {
