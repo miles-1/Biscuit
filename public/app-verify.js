@@ -100,6 +100,29 @@ function nextVerifyPage() {
     }
 }
 
+function formatPageList(pages) {
+    const nums = (Array.isArray(pages) ? pages : []).map(String);
+    if (nums.length <= 1) return nums.join("");
+    if (nums.length === 2) return `${nums[0]} and ${nums[1]}`;
+    return `${nums.slice(0, -1).join(", ")}, and ${nums[nums.length - 1]}`;
+}
+
+function unidentifiedStatusText(page) {
+    const err = page.identify_error;
+    const assnId = page.decoded_assn_id;
+    const pageNum = page.decoded_page;
+    if (err === "unknown_assn") {
+        return `Unidentified (assn ${assnId} does not exist)`;
+    }
+    if (err === "unknown_page") {
+        return `Unidentified (assn ${assnId} page ${pageNum} does not exist)`;
+    }
+    if (err === "duplicate") {
+        return `Unidentified (duplicate of pages ${formatPageList(page.duplicate_ppages)} as assn ${assnId} page ${pageNum})`;
+    }
+    return "Unidentified (data matrix failed)";
+}
+
 function renderVerifyPage() {
     if (verifyScanResults.length === 0) return;
     const page = verifyScanResults[currentVerifyIndex];
@@ -138,12 +161,17 @@ function renderVerifyPage() {
         status.textContent = "Identified";
         status.style.color = "#16a34a";
     } else {
-        assnIdInput.value = page.identified ? page.assn_id : '';
-        pageNumInput.value = page.identified ? page.page : '';
-        if (!page.identified) {
-            status.textContent = "Unidentified (data matrix failed)";
-        } else {
+        if (page.identified) {
+            assnIdInput.value = page.assn_id;
+            pageNumInput.value = page.page;
             status.textContent = "Anchors failed — enter ID/page and mark anchors";
+        } else {
+            assnIdInput.value = page.decoded_assn_id ?? "";
+            pageNumInput.value = page.decoded_page ?? "";
+            status.textContent = unidentifiedStatusText(page);
+            if (Array.isArray(page.tiff_anchors)) {
+                verifyAnchors = page.tiff_anchors.map((a) => [...a]);
+            }
         }
         status.style.color = "#dc2626";
     }

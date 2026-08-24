@@ -104,15 +104,37 @@ function find_anchor_squares(image_3d::AbstractArray{UInt8, 3})::Vector{NTuple{2
     return tiff_anchors
 end
 
-function extract_tiff_data(tiff_path::String; corrections::Dict{String, Any}=Dict{String, Any}())::Tuple{Dict{Int64, Dict{Int64, NamedTuple}}, Dict{Int64, NTuple{2, Int64}}}
+function load_page_elements_data(page_elements_file::String)
+    return Dict(
+        parse(Int64, assn_id) => Dict(
+            parse(Int64, page) => elems for (page, elems) in page_dict
+        ) for (assn_id, page_dict) in JSON.parsefile(page_elements_file)
+    )
+end
+
+function _english_join_ints(indices::Vector{Int64})::String
+    n = length(indices)
+    n == 0 && return ""
+    n == 1 && return string(indices[1])
+    n == 2 && return "$(indices[1]) and $(indices[2])"
+    return join(view(indices, 1:n-1), ", ") * ", and $(indices[n])"
+end
+
+function extract_tiff_data(
+    tiff_path::String;
+    corrections::Dict{String, Any}=Dict{String, Any}(),
+    page_elements_data,
+)::Tuple{Dict{Int64, Dict{Int64, NamedTuple}}, Dict{Int64, NTuple{2, Int64}}, Dict{Int64, Dict{String, Any}}}
     tiff_data = Dict{Int64, Dict{Int64, NamedTuple}}()
     ppage_dict = Dict{Int64, NTuple{2, Int64}}()
+    identify_issues = Dict{Int64, Dict{String, Any}}()
+    decoded = NamedTuple[]
     printstyled("Reading Data Matrices and Locating Anchors\n"; bold=true, underline=true)
     pages = load_binary_pages(tiff_path)
     for (ppage_indx, image_3d) in enumerate(pages)
         println("- Page $ppage_indx...")
-        w, h = size(image_3d, 2), size(image_3d, 3)
-        
+        w, h = Int64(size(image_3d, 2)), Int64(size(image_3d, 3))
+
         c = get(corrections, string(ppage_indx), nothing)
         dm_data = if isnothing(c)
             find_data_matrix(image_3d)
@@ -120,37 +142,87 @@ function extract_tiff_data(tiff_path::String; corrections::Dict{String, Any}=Dic
             @assert haskey(c, "assn_id") "correction for page $ppage_indx missing assn_id"
             (; assn_id=Int64(c["assn_id"]), page=Int64(c["page"]))
         end
-        
-        if !isempty(dm_data)
-            (; assn_id, page) = dm_data
-            tiff_anchors = !isnothing(c) && haskey(c, "tiff_anchors") ? 
-                [Tuple(Float64.(a)) for a in c["tiff_anchors"]] : 
-                find_anchor_squares(image_3d)
-                
-            assn_id_dict = get!(() -> Dict{Int64, NamedTuple}(), tiff_data, assn_id)
-            ppage_dict[ppage_indx] = (assn_id, page)
-            assn_id_dict[page] = (; tiff_anchors, w, h)
+
+        tiff_anchors = !isnothing(c) && haskey(c, "tiff_anchors") ?
+            [Tuple(Float64.(a)) for a in c["tiff_anchors"]] :
+            find_anchor_squares(image_3d)
+        if isempty(dm_data)
+            identify_issues[ppage_indx] = Dict{String, Any}(
+                "identify_error" => "no_datamatrix",
+                "tiff_anchors" => tiff_anchors,
+            )
+            continue
         end
+        (; assn_id, page) = dm_data
+        println(" "^4 * "Assn $assn_id, page $page")
+        push!(decoded, (; ppage_indx, assn_id, page, tiff_anchors, w, h))
     end
-    return tiff_data, ppage_dict
+
+    pair_to_pages = Dict{Tuple{Int64, Int64}, Vector{Int64}}()
+    for d in decoded
+        push!(get!(() -> Int64[], pair_to_pages, (d.assn_id, d.page)), d.ppage_indx)
+    end
+    for ((assn_id, page), ppages) in pairs(pair_to_pages)
+        length(ppages) > 1 || continue
+        sorted = sort(ppages)
+        both_or_all = length(sorted) == 2 ? "both" : "all"
+        println("Pages $(_english_join_ints(sorted)) $both_or_all decoded as assn $assn_id page $page — leaving $both_or_all unidentified")
+    end
+
+    for d in decoded
+        assn_pages = get(page_elements_data, d.assn_id, nothing)
+        error_kind = if assn_pages === nothing
+            "unknown_assn"
+        elseif !haskey(assn_pages, d.page)
+            "unknown_page"
+        elseif length(pair_to_pages[(d.assn_id, d.page)]) > 1
+            "duplicate"
+        else
+            nothing
+        end
+        if error_kind === nothing
+            assn_id_dict = get!(() -> Dict{Int64, NamedTuple}(), tiff_data, d.assn_id)
+            ppage_dict[d.ppage_indx] = (d.assn_id, d.page)
+            assn_id_dict[d.page] = (; tiff_anchors=d.tiff_anchors, w=d.w, h=d.h)
+            continue
+        end
+        if error_kind != "duplicate"
+            println("Page $(d.ppage_indx): decoded assn $(d.assn_id) page $(d.page) is not in this assignment — leaving unidentified")
+        end
+        issue = Dict{String, Any}(
+            "identify_error" => error_kind,
+            "decoded_assn_id" => d.assn_id,
+            "decoded_page" => d.page,
+            "tiff_anchors" => d.tiff_anchors,
+        )
+        if error_kind == "duplicate"
+            issue["duplicate_ppages"] = sort(pair_to_pages[(d.assn_id, d.page)])
+        end
+        identify_issues[d.ppage_indx] = issue
+    end
+    return tiff_data, ppage_dict, identify_issues
 end
 
 function get_mapped_data(
     ;
-    tiff_data::Dict{Int64, Dict{Int64, NamedTuple}}, 
-    page_elements_file::String
+    tiff_data::Dict{Int64, Dict{Int64, NamedTuple}},
+    page_elements_data,
 )
-    page_elements_data = Dict(
-        parse(Int64, assn_id) => Dict(
-            parse(Int64, page) => elems for (page, elems) in page_dict
-        ) for (assn_id, page_dict) in JSON.parsefile(page_elements_file)
-    )
     mapped_data = Dict{Int64, Dict{Int64, NamedTuple}}()
     for (assn_id, page_dict) in pairs(tiff_data)
         mapped_assn_id_data = get!(() -> Dict{Int64, NamedTuple}(), mapped_data, assn_id)
+        assn_pages = get(page_elements_data, assn_id, nothing)
+        if assn_pages === nothing
+            println(" "^4 * "Unknown assignment $assn_id — skipping mapping.")
+            continue
+        end
         for (p_indx, p_dict) in pairs(page_dict)
             (tiff_anchors, w, h) = p_dict
-            elems = page_elements_data[assn_id][p_indx]
+            elems = get(assn_pages, p_indx, nothing)
+            if elems === nothing
+                println(" "^4 * "Unknown page $p_indx for assignment $assn_id — skipping mapping.")
+                continue
+            end
             anchors = [Tuple(Float64.(a)) for a in get(elems, "anchors", [])]
             q_heights = [Tuple(Float64.(b)) for b in get(elems, "q_heights", [])]
             num_tiff_anchors = length(tiff_anchors)
@@ -199,7 +271,7 @@ function get_mapped_data(
             )
         end
     end
-    return mapped_data, page_elements_data
+    return mapped_data
 end
 
 function black_pixel_proportion_in_radius(frame_array::Matrix{UInt8}, bubble_point::NTuple{2, Int64})::Float64
@@ -236,7 +308,11 @@ function get_question_info_by_assn(
         if !haskey(ppage_dict, ppage_indx) continue end
         println("- Page $ppage_indx")
         (assn_id, page) = ppage_dict[ppage_indx]
-        mapped_nt = mapped_data[assn_id][page]
+        mapped_nt = get(get(mapped_data, assn_id, Dict{Int64, NamedTuple}()), page, nothing)
+        if mapped_nt === nothing
+            println(" "^4 * "No mapped data for assn $assn_id page $page — skipping.")
+            continue
+        end
         question_vector = get!(assn_data, assn_id, Vector{NamedTuple}())
         if !haskey(mapped_nt, :mapped_q_heights)
             # Keep one stub per expected question so ordering still matches selection.json;
@@ -249,7 +325,11 @@ function get_question_info_by_assn(
         else
             mapped_q_heights = get(mapped_nt, :mapped_q_heights, Float64[])
             mapped_bubble_points = get(mapped_nt, :mapped_bubble_points, Points2F64())
-            page_elements_nt = page_elements_data[assn_id][page]
+            page_elements_nt = get(get(page_elements_data, assn_id, Dict()), page, nothing)
+            if page_elements_nt === nothing
+                println(" "^4 * "Unknown page $page for assignment $assn_id — skipping.")
+                continue
+            end
             q_heights = [Tuple(Float64.(b)) for b in get(page_elements_nt, "q_heights", [])]
             bubbles = [Tuple(Float64.(b)) for b in get(page_elements_nt, "bubbles", [])]
             num_qs = length(q_heights)
@@ -307,7 +387,11 @@ function process_assn_data(
 )::Dict{Int64, Dict{String, Any}}
     processed_assn_data = Dict{Int64, Dict{String, Any}}()
     for (assn_id, questions) in pairs(assn_data)
-        all_bubble_darknesses = reduce(vcat, (vec(nt.bubble_densities) for nt in questions if haskey(nt,:bubble_densities)))
+        all_bubble_darknesses = reduce(
+            vcat,
+            (vec(nt.bubble_densities) for nt in questions if haskey(nt, :bubble_densities));
+            init=Float64[],
+        )
         processed_questions = if isempty(all_bubble_darknesses)
             questions
         else
@@ -456,6 +540,7 @@ function generate_marked_tiffs(
     ppage_dict::Dict{Int64, NTuple{2, Int64}},
     processed_assn_data::Dict{Int64, Dict{String, Any}},
     output_dir::String,
+    identify_issues::Dict{Int64, Dict{String, Any}}=Dict{Int64, Dict{String, Any}}(),
 )::Nothing
     marked_frames = Tuple{Int64, AbstractArray{UInt8, 3}}[]
     scan_results = Dict{String, Any}[]
@@ -501,7 +586,7 @@ function generate_marked_tiffs(
                 cv.drawMarker(frame_cv, cv.Point{Int32}(round(Int32, a[1]), round(Int32, a[2])), blue, markerType=cv.MARKER_SQUARE, markerSize=25, thickness=3)
             end
             place_text("Assn ID $assn_id, Page $page", frame_cv; w, h, text_color=(155, 12, 30), pad_right_corner=true)
-            mapped_nt = mapped_data[assn_id][page]
+            mapped_nt = get(get(mapped_data, assn_id, Dict{Int64, NamedTuple}()), page, (; num_tiff_anchors=0, num_questions=0))
             page_info["anchors_ok"] = hasproperty(mapped_nt, :mapped_q_heights)
             if page_info["anchors_ok"]
                 for qh in mapped_nt.mapped_q_heights
@@ -542,6 +627,13 @@ function generate_marked_tiffs(
             if !isnothing(current_assn_id)
                 save_annotated_assn(marked_frames, current_assn_id; output_dir, scan_results)
                 current_assn_id = nothing
+            end
+            issue = get(identify_issues, ppage_indx, Dict{String, Any}("identify_error" => "no_datamatrix"))
+            merge!(page_info, issue)
+            blue = (155.0, 12.0, 30.0, 0.0)
+            for a in get(issue, "tiff_anchors", [])
+                (ax, ay) = Tuple(Float64.(a))
+                cv.drawMarker(frame_cv, cv.Point{Int32}(round(Int32, ax), round(Int32, ay)), blue, markerType=cv.MARKER_SQUARE, markerSize=25, thickness=3)
             end
             push!(scan_results, page_info)
             push!(marked_frames, (ppage_indx, frame_cv))
@@ -727,8 +819,9 @@ function process_scans(
         page_elements_file = joinpath(archive_dir, "page_elements.json")
         @assert isfile(page_elements_file) "Missing page_elements.json in assnversions archive: $assn_versions_file"
         annotated_dir = joinpath(archive_dir, "annotated")
-        tiff_data, ppage_dict = extract_tiff_data(tiff_path; corrections)
-        mapped_data, page_elements_data = get_mapped_data(; tiff_data, page_elements_file)
+        page_elements_data = load_page_elements_data(page_elements_file)
+        tiff_data, ppage_dict, identify_issues = extract_tiff_data(tiff_path; corrections, page_elements_data)
+        mapped_data = get_mapped_data(; tiff_data, page_elements_data)
         assn_data = get_question_info_by_assn(tiff_path; mapped_data, page_elements_data, ppage_dict)
         processed_assn_data = process_assn_data(assn_data; mapped_data, output_dir=archive_dir)
         if namereader_file !== nothing && !isempty(strip(String(namereader_file)))
@@ -741,7 +834,7 @@ function process_scans(
                 namereader_file=String(namereader_file),
             )
         end
-        generate_marked_tiffs(tiff_path; ppage_dict, tiff_data, mapped_data, processed_assn_data, output_dir=annotated_dir)
+        generate_marked_tiffs(tiff_path; ppage_dict, tiff_data, mapped_data, processed_assn_data, output_dir=annotated_dir, identify_issues)
         make_archive_from_dir(archive_dir, assn_archive_file)
         println("Updated: $assn_archive_file (added processed_assn_data.json and annotated scans)")
         stale_tmp = abspath(assn_archive_file) * ".tmp"
