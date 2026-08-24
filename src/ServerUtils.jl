@@ -183,6 +183,7 @@ function _build_grading_data_from_archive()::Dict{Int64, Dict{String, Any}}
     processed = _read_file_from_temp("processed_assn_data.json")
     master = _read_file_from_temp("master.json")
     selection = _read_file_from_temp("selection.json")
+    page_elements = _read_file_from_temp("page_elements.json"; give_default=true)
     var_answers = _read_file_from_temp("var_answers.json"; give_default=true)
     name_guesses = _read_file_from_temp("name_guesses.json"; give_default=true)
     grading_data = Dict{Int64, Dict{String, Any}}()
@@ -326,7 +327,11 @@ function _build_grading_data_from_archive()::Dict{Int64, Dict{String, Any}}
         processed_questions = begin
             @assert isa(processed_entry, AbstractDict) "processed_assn_data entry for assn id $assn_id must be an object"
             @assert haskey(processed_entry, "questions") "processed_assn_data entry for assn id $assn_id is missing `questions`"
-            processed_entry["questions"]
+            _pad_processed_questions_for_missing_pages(
+                processed_entry["questions"],
+                assn_id_int,
+                page_elements,
+            )
         end
         @assert length(selection_version_all_questions) == length(processed_questions) "discrepancy in number of questions between processed json and selection json for assn id $assn_id"
         # collect information from processed json and correct answer from master + selection jsons
@@ -381,6 +386,31 @@ function _build_grading_data_from_archive()::Dict{Int64, Dict{String, Any}}
         grading_data[assn_id_int] = entry
     end
     return grading_data
+end
+
+function _pad_processed_questions_for_missing_pages(processed_questions, assn_id_int::Int64, page_elements)::Vector
+    isa(processed_questions, AbstractVector) || return processed_questions
+    pe = get(page_elements, string(assn_id_int), nothing)
+    pe === nothing && return processed_questions
+    by_page = Dict{Int64, Vector{Any}}()
+    for q in processed_questions
+        isa(q, AbstractDict) && haskey(q, "page") || continue
+        push!(get!(() -> Any[], by_page, Int64(q["page"])), q)
+    end
+    out = Any[]
+    for page in sort!(parse.(Int64, collect(keys(pe))))
+        page_elems = get(pe, string(page), Dict())
+        n_expected = length(get(page_elems, "q_heights", []))
+        have = get(by_page, page, nothing)
+        if have === nothing || isempty(have)
+            for _ in 1:n_expected
+                push!(out, Dict{String, Any}("page" => page))
+            end
+        else
+            append!(out, have)
+        end
+    end
+    return out
 end
 
 function _flatten_master_questions_export(questions::AbstractVector, path::String="")::Vector{Dict{String, Any}}

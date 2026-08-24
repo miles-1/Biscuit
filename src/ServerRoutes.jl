@@ -257,7 +257,11 @@ end
         end
     end
     saved_grading_data = _read_file_from_temp("grading_data.json"; give_default=true)
-    grading_data = isempty(saved_grading_data) ? _build_grading_data_from_archive() : saved_grading_data
+    grading_data = try
+        isempty(saved_grading_data) ? _build_grading_data_from_archive() : saved_grading_data
+    catch e
+        return Dict("status" => "error", "message" => "Could not build grading data: $e")
+    end
     return Dict("status" => "success", "grading_data" => grading_data)
 end
 

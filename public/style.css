@@ -863,8 +863,8 @@ input[type="number"].score-input {
     overflow: auto;
     line-height: 1.45;
 }
-#message-modal.modal-overlay,
 #verify-prompt-modal.modal-overlay { z-index: 1300; }
+#message-modal.modal-overlay { z-index: 1400; }
 .export-modal-card { width: min(620px, calc(100vw - 40px)); }
 .export-modal-card .path-block {
     white-space: pre-wrap;

@@ -55,6 +55,7 @@ async function startVerifyScans() {
         return true;
 
     } catch (e) {
+        closeVerifyPrompt();
         showMessageModal({
             title: 'Verification Failed',
             message: 'Failed to start verification: ' + e.message,

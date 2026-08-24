@@ -360,7 +360,37 @@ function get_question_info_by_assn(
             end
         end
     end
+    for assn_id in keys(mapped_data)
+        get!(assn_data, assn_id, NamedTuple[])
+    end
+    for (assn_id, questions) in collect(pairs(assn_data))
+        assn_pages = get(page_elements_data, assn_id, nothing)
+        assn_pages === nothing && continue
+        assn_data[assn_id] = _questions_with_missing_page_stubs(questions, assn_pages)
+    end
     return assn_data
+end
+
+function _questions_with_missing_page_stubs(questions::Vector{NamedTuple}, assn_pages)::Vector{NamedTuple}
+    by_page = Dict{Int64, Vector{NamedTuple}}()
+    for q in questions
+        push!(get!(() -> NamedTuple[], by_page, Int64(q.page)), q)
+    end
+    out = NamedTuple[]
+    for page in sort!(collect(keys(assn_pages)))
+        n_expected = length(get(get(assn_pages, page, Dict()), "q_heights", []))
+        have = get(by_page, page, NamedTuple[])
+        if isempty(have)
+            n_expected == 0 && continue
+            println(" "^4 * "Missing page $page — adding $n_expected question stub(s).")
+            for _ in 1:n_expected
+                push!(out, (; page))
+            end
+        else
+            append!(out, have)
+        end
+    end
+    return out
 end
 
 # Absolute thresholds were 15 and 3 ink pixels in a radius-7 disk (149 pixels) on 1704×2200 scans.

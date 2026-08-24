@@ -6,3 +6,4 @@
 - [ ] get rid of "choose one option"?
 - [ ] fix default path save option for master json to not be practice or whatever
 - [ ] user does not call close
+- [ ] change algorithm to remove false detect anchor in data matrix
