@@ -1,6 +1,32 @@
 // Grade Assignments - Input Grades step: per-question/per-assn navigation, answer scoring, the
 // bubble/rubric/manual-score UI, and saving the finished work back to the archive.
 
+let persistedFeedbackTextareaHeight = null;
+
+function studentFirstName(fullName) {
+    if (fullName == null) return null;
+    const s = String(fullName).trim();
+    if (!s) return null;
+    if (s.includes(',')) {
+        const given = s.slice(s.indexOf(',') + 1).trim();
+        return given.split(/\s+/)[0] || null;
+    }
+    return s.split(/\s+/)[0] || null;
+}
+
+function currentGradeAssnId() {
+    const qid = questionIds[currentQIndex];
+    const assns = questionsMap[qid]?.assns;
+    if (!assns) return null;
+    return Object.keys(assns)[currentAssnIndexForQ];
+}
+
+function applyFeedbackTemplateName(text, assnId = currentGradeAssnId()) {
+    const name = studentFirstName(gradingData?.[assnId]?.name);
+    if (!name) return text;
+    return String(text).split('{{name}}').join(name);
+}
+
 async function finishNameAssn() {
     await commitCurrentGradingData();
     gradeStep1.classList.add('hidden');
@@ -639,7 +665,7 @@ function parseRubricRow(entry, idx) {
     };
 }
 
-function buildCurrentScoreRow({ points, scoreValue = null, scoreInput = null, invalid = false }) {
+function buildCurrentScoreRow({ points, scoreValue = null, scoreInput = null, invalid = false, assignAllFullPoints = false }) {
     const wrap = document.createElement('div');
     wrap.classList.add('score-container');
     const label = document.createElement('span');
@@ -660,6 +686,29 @@ function buildCurrentScoreRow({ points, scoreValue = null, scoreInput = null, in
     ptsInfo.classList.add('score-points');
     ptsInfo.textContent = ` / ${points} points`;
     wrap.appendChild(ptsInfo);
+    if (assignAllFullPoints) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.classList.add('score-full-points-btn');
+        btn.textContent = 'Assign all students full points';
+        btn.onclick = () => {
+            const qid = questionIds[currentQIndex];
+            const { assns } = questionsMap[qid] || {};
+            const full = Number(points);
+            if (!assns || !Number.isFinite(full)) return;
+            Object.values(assns).forEach((item) => {
+                item.points = full;
+                item.is_graded = true;
+                item.max_points = full;
+            });
+            if (scoreInput) {
+                scoreInput.value = String(full);
+                scoreInput.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+            updateGradeDropdowns();
+        };
+        wrap.appendChild(btn);
+    }
     if (invalid) {
         const msg = document.createElement('span');
         msg.classList.add('score-invalid-msg');
@@ -887,7 +936,12 @@ async function renderGradeStep() {
                 };
 
                 scoreInput.oninput = syncManualScore;
-                const scoreRow = buildCurrentScoreRow({ points: pts, scoreInput, invalid: false });
+                const scoreRow = buildCurrentScoreRow({
+                    points: pts,
+                    scoreInput,
+                    invalid: false,
+                    assignAllFullPoints: qType === 'essay' || qType === 'fill_blank',
+                });
                 scoreRow.appendChild(invalidMsg);
                 optContainer.appendChild(scoreRow);
                 syncManualScore();
@@ -912,9 +966,21 @@ async function renderGradeStep() {
     feedbackInput.id = `feedback-input-${currentQIndex}-${currentAssnIndexForQ}`;
     feedbackInput.classList.add("feedback-input");
     feedbackInput.value = currentItem.feedback || "";
+    if (persistedFeedbackTextareaHeight) {
+        feedbackInput.style.height = `${persistedFeedbackTextareaHeight}px`;
+    }
     feedbackInput.oninput = (e) => {currentItem.feedback = e.target.value;};
+    const persistFeedbackHeight = () => {
+        const h = feedbackInput.getBoundingClientRect().height;
+        if (h > 0) persistedFeedbackTextareaHeight = h;
+    };
+    feedbackInput.addEventListener('mouseup', persistFeedbackHeight);
+    if (typeof ResizeObserver !== 'undefined') {
+        new ResizeObserver(persistFeedbackHeight).observe(feedbackInput);
+    }
     feedbackWrap.appendChild(feedbackLabel);
     feedbackWrap.appendChild(feedbackInput);
+    if (typeof enhanceTypstMarkupFields === 'function') enhanceTypstMarkupFields(feedbackWrap);
 
     const saveTemplateBtn = document.createElement('button');
     saveTemplateBtn.type = 'button';
@@ -984,8 +1050,10 @@ function renderFeedbackTemplateList(listEl, qId, feedbackInput, currentItem) {
         };
 
         item.onclick = () => {
-            feedbackInput.value = text;
-            currentItem.feedback = text;
+            const applied = applyFeedbackTemplateName(text);
+            feedbackInput.value = applied;
+            currentItem.feedback = applied;
+            feedbackInput.dispatchEvent(new Event('input', { bubbles: true }));
         };
         item.appendChild(body);
         item.appendChild(removeBtn);

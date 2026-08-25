@@ -842,16 +842,106 @@ input[type="number"].score-input {
     pointer-events: none;
     transform: translate(-50%, -50%);
 }
-.verify-anchor-label {
-    position: absolute;
-    top: -16px;
-    left: 50%;
-    transform: translateX(-50%);
-    color: #0ea5e9;
-    font-weight: bold;
-    font-size: 12px;
-    line-height: 1;
+.typst-highlight-wrap {
+    display: grid;
+    min-width: 0;
+}
+.typst-highlight-wrap.is-textarea {
+    width: 100%;
+}
+.typst-highlight-wrap.is-input {
+    flex: 1;
+    min-width: 0;
+}
+.typst-highlight-wrap:has(#builder-title) {
+    flex: 0 1 340px;
+    width: 340px;
+    max-width: 100%;
+}
+.typst-highlight-wrap > .typst-highlight-pre,
+.typst-highlight-wrap > .typst-highlight-field {
+    grid-area: 1 / 1;
+    margin: 0;
+    width: 100%;
+    box-sizing: border-box;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.9rem;
+    line-height: 1.4;
+    tab-size: 2;
+}
+.typst-highlight-pre {
     pointer-events: none;
+    overflow: hidden;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    color: var(--text);
+    background: var(--bg-input);
+    border: 1px solid var(--border-input);
+    border-radius: 4px;
+    padding: 8px 10px;
+}
+.typst-highlight-wrap.is-input .typst-highlight-pre,
+.typst-highlight-wrap.is-input .typst-highlight-field {
+    white-space: pre;
+    overflow: hidden;
+    height: 32px;
+    padding: 4px 8px;
+    line-height: 22px;
+}
+.typst-highlight-wrap.is-textarea .typst-highlight-pre,
+.typst-highlight-wrap.is-textarea .typst-highlight-field {
+    padding: 8px 10px;
+    min-height: 80px;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+.typst-highlight-wrap.is-textarea .typst-highlight-field {
+    resize: vertical;
+    overflow: auto;
+}
+.typst-highlight-wrap.is-textarea .typst-highlight-pre {
+    overflow: hidden;
+}
+.typst-highlight-field {
+    position: relative;
+    z-index: 1;
+    background: transparent !important;
+    color: transparent !important;
+    caret-color: var(--text);
+    border-color: var(--border-input);
+}
+.typst-highlight-field::placeholder {
+    color: var(--muted, #888);
+}
+.typst-highlight-field::selection {
+    background: rgba(14, 165, 233, 0.35);
+    color: transparent;
+}
+.token.comment { color: var(--text-muted, #888); font-style: italic; }
+.token.keyword, .token.boolean { color: #7c3aed; }
+.token.function { color: #2563eb; }
+.token.string, .token.raw { color: #059669; }
+.token.number { color: #d97706; }
+.token.operator, .token.punctuation, .token.escaped { color: #64748b; }
+.token.heading { font-weight: 700; color: #1d4ed8; }
+.token.math { color: #db2777; }
+.token.label, .token.reference, .token.symbol { color: #0891b2; }
+.token.bold, .token.boltalic { font-weight: 700; }
+.token.italic, .token.boltalic { font-style: italic; }
+.token.url { color: #0284c7; text-decoration: underline; }
+html[data-theme="dark"] .token.keyword,
+html[data-theme="dark"] .token.boolean { color: #c4b5fd; }
+html[data-theme="dark"] .token.function { color: #93c5fd; }
+html[data-theme="dark"] .token.string,
+html[data-theme="dark"] .token.raw { color: #6ee7b7; }
+html[data-theme="dark"] .token.number { color: #fbbf24; }
+html[data-theme="dark"] .token.heading { color: #93c5fd; }
+html[data-theme="dark"] .token.math { color: #f9a8d4; }
+
+.score-full-points-btn {
+    margin-left: 8px;
+    font-size: 0.82rem;
+    white-space: nowrap;
 }
 
 .modal-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
@@ -896,7 +986,7 @@ input[type="number"].score-input {
     font-size: 0.92rem;
 }
 
-#file-picker-modal.modal-overlay { z-index: 1000; }
+#file-picker-modal.modal-overlay { z-index: 1350; }
 .file-picker-card {
     background: var(--bg-elevated);
     color: var(--text);
@@ -1205,7 +1295,7 @@ hr { border: none; border-top: 1px solid var(--border); }
     border-radius: 4px;
     background: var(--bg-input);
     color: var(--text);
-    font-family: inherit;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     font-size: 0.9rem;
     margin: 0;
     resize: vertical;

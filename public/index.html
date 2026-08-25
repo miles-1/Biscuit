@@ -13,6 +13,13 @@
         })();
     </script>
     <link rel="stylesheet" href="style.css" />
+    <script>
+        window.Prism = window.Prism || {};
+        Prism.manual = true;
+    </script>
+    <script src="prism.js"></script>
+    <script src="prism-typst.js"></script>
+    <script src="typst-highlight.js"></script>
 </head>
 <body>
     <div class="top-chrome">
@@ -211,8 +218,9 @@
                     <input type="number" id="verify-assn-id" min="0"><br><br>
                     <label>Page Number:</label><br>
                     <input type="number" id="verify-page-num" min="1"><br><br>
-                    <p style="font-size: 0.9em; color: #555;"><i>For pages that need correction, enter Assn ID and Page Number, then click at least 4 anchor positions on the image (up to 14).</i></p>
-                    <button type="button" onclick="clearVerifyAnchors()">Clear Anchors</button><br><br>
+                    <p style="font-size: 0.9em; color: #555;"><i>For pages that need correction, enter Assn ID and Page Number, then click at least 4 anchor positions on the image (up to 14). Click an existing circle to remove it.</i></p>
+                    <p>Anchors placed: <strong id="verify-anchor-count">0</strong></p>
+                    <button type="button" onclick="resetVerifyAnchors()">Reset Anchors</button><br><br>
                     <button type="button" onclick="saveVerifyCorrection()" style="font-weight: bold;">Save Correction</button>
                 </div>
             </div>
@@ -459,8 +467,14 @@
             <p style="margin: 4px 0 10px; font-size: 0.92rem; color: var(--text-muted);">
                 Save this master JSON file in your workspace.
             </p>
-            <label for="save-master-path-input"><strong>File Path:</strong></label><br>
-            <input type="text" id="save-master-path-input" style="width: 100%; box-sizing: border-box; margin-top: 4px;" placeholder="practice/my_exam.json">
+            <label for="save-master-name-input"><strong>File name:</strong></label><br>
+            <input type="text" id="save-master-name-input" style="width: 100%; box-sizing: border-box; margin-top: 4px;" placeholder="my_exam.json">
+            <br><br>
+            <label for="save-master-folder-input"><strong>Folder:</strong></label><br>
+            <div style="display: flex; gap: 8px; margin-top: 4px; align-items: center;">
+                <input type="text" id="save-master-folder-input" style="flex: 1; box-sizing: border-box;" placeholder="(workspace folder)">
+                <button type="button" onclick="pickFolder('save-master-folder-input')">Browse</button>
+            </div>
             <p id="save-master-status" class="classes-modal-status"></p>
             <div class="modal-actions">
                 <button type="button" style="font-weight: bold;" onclick="confirmSaveMaster()">Save File</button>

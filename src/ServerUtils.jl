@@ -52,11 +52,15 @@ function compile_feedback_bundle(;
         rm(output_dir; recursive=true)
         println("The folder $output_dir already existed, so it was deleted.")
     end
+    counts_file = joinpath(dirname(abspath(annotated_scan_folder)), "assn_page_counts.json")
+    ProcessScans.write_assn_page_counts(annotated_scan_folder)
+    @assert isfile(counts_file) "assn_page_counts.json not found next to annotated scans"
     # Typst stdin compile resolves json()/image() paths relative to CWD; absolute paths get
     # mis-joined onto the project root (e.g. /Users/... → <cwd>/Users/...).
     typst_compile_feedback_bundle(;
         grading_data_file=replace(relpath(grading_data_file), "\\" => "/"),
         annotated_scan_folder=replace(relpath(annotated_scan_folder), "\\" => "/"),
+        assn_page_counts_file=replace(relpath(counts_file), "\\" => "/"),
         output_dir=abspath(output_dir),
     )
     return nothing
@@ -533,31 +537,42 @@ end
 const ASSIGNMENT_SCORES_HEADER = "Assignment Scores"
 const POINTS_POSSIBLE_CELL = "    Points Possible"
 
-# Canvas-style non-detailed scores CSV: Student, optional ID, Assignment Scores,
+function _canvas_assignment_column_name(master::Dict)::String
+    raw = strip(string(get(master, "title", ASSIGNMENT_SCORES_HEADER)))
+    isempty(raw) && return ASSIGNMENT_SCORES_HEADER
+    cleaned = replace(raw, r"[^A-Za-z0-9 (){}\[\]/\-]" => "")
+    cleaned = strip(replace(cleaned, r" +" => " "))
+    return isempty(cleaned) ? ASSIGNMENT_SCORES_HEADER : cleaned
+end
+
+# Canvas-style non-detailed scores CSV: Student, optional ID, optional Section, assignment title,
 # plus a "    Points Possible" row under the header. Email is never included.
 function _write_canvas_scores_csv(
     path::String,
     rows::Vector{Dict{String, Any}},
     has_id::Bool,
+    has_section::Bool,
+    score_header::String,
     max_points::Union{Float64, Missing},
 )::Nothing
-    headers = has_id ? String["Student", "ID", ASSIGNMENT_SCORES_HEADER] : String["Student", ASSIGNMENT_SCORES_HEADER]
+    headers = String["Student"]
+    has_id && push!(headers, "ID")
+    has_section && push!(headers, "Section")
+    push!(headers, score_header)
     open(path, "w") do io
         println(io, join(headers, ","))
         max_cell = _csv_number_field(max_points)
-        if has_id
-            println(io, POINTS_POSSIBLE_CELL * ",," * max_cell)
-        else
-            println(io, POINTS_POSSIBLE_CELL * "," * max_cell)
-        end
+        pp_cells = String[POINTS_POSSIBLE_CELL]
+        has_id && push!(pp_cells, "")
+        has_section && push!(pp_cells, "")
+        push!(pp_cells, max_cell)
+        println(io, join(pp_cells, ","))
         for row in rows
-            name_cell = _csv_field(get(row, "Student", missing))
-            score_cell = _csv_number_field(get(row, ASSIGNMENT_SCORES_HEADER, missing))
-            if has_id
-                println(io, join((name_cell, _csv_field(get(row, "ID", missing)), score_cell), ","))
-            else
-                println(io, join((name_cell, score_cell), ","))
-            end
+            cells = String[_csv_field(get(row, "Student", missing))]
+            has_id && push!(cells, _csv_field(get(row, "ID", missing)))
+            has_section && push!(cells, _csv_field(get(row, "Section", missing)))
+            push!(cells, _csv_number_field(get(row, score_header, missing)))
+            println(io, join(cells, ","))
         end
     end
     return nothing
@@ -702,30 +717,39 @@ function export_score_csvs(;
 
     scores_rows = Dict{String, Any}[]
     has_id = roster_has_id(students_table)
+    has_section = roster_has_section(students_table)
+    score_header = _canvas_assignment_column_name(master)
     if !isnothing(students_table) && haskey(students_table, :Student)
         roster_names = string.(students_table.Student)
         roster_ids = has_id ? students_table.ID : nothing
+        roster_sections = has_section ? students_table.Section : nothing
         used = Set{String}()
         for (i, rname) in enumerate(roster_names)
             haskey(named_totals, rname) || continue
             push!(used, rname)
-            row = Dict{String, Any}("Student" => rname, ASSIGNMENT_SCORES_HEADER => named_totals[rname])
+            row = Dict{String, Any}("Student" => rname, score_header => named_totals[rname])
             if has_id
                 row["ID"] = roster_ids[i]
+            end
+            if has_section
+                row["Section"] = roster_sections[i]
             end
             push!(scores_rows, row)
         end
         for name in sort(collect(keys(named_totals)); by=lowercase)
             name in used && continue
-            row = Dict{String, Any}("Student" => name, ASSIGNMENT_SCORES_HEADER => named_totals[name])
+            row = Dict{String, Any}("Student" => name, score_header => named_totals[name])
             if has_id
                 row["ID"] = missing
+            end
+            if has_section
+                row["Section"] = missing
             end
             push!(scores_rows, row)
         end
     else
         for name in sort(collect(keys(named_totals)); by=lowercase)
-            push!(scores_rows, Dict{String, Any}("Student" => name, ASSIGNMENT_SCORES_HEADER => named_totals[name]))
+            push!(scores_rows, Dict{String, Any}("Student" => name, score_header => named_totals[name]))
         end
     end
 
@@ -734,6 +758,8 @@ function export_score_csvs(;
         scores_path,
         scores_rows,
         has_id,
+        has_section,
+        score_header,
         _assignment_max_points(master),
     )
 

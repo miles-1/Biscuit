@@ -24,7 +24,8 @@
 #let get_feedback_documents(
   grading_data, 
   annotated_scan_folder_name,
-  include_correct_answers, 
+  include_correct_answers,
+  assn_page_counts,
   num_q_table_columns: 3
 ) = {
   let no_names = 0
@@ -44,7 +45,8 @@
     let num_questions = questions.len()
     let question_chunk_size = calc.ceil(num_questions / num_q_table_columns)
     // feedback content
-    let by_page_by_q_content = ()
+    let n_pages = int(assn_page_counts.at(assn_id_str, default: 0))
+    let by_page_by_q_content = range(n_pages + 1).map(i => ())
     let question_notes = ()
     for q in questions {
       let has_feedback = "feedback" in q
@@ -154,8 +156,11 @@
 
 #let grading_data_file_name = sys.inputs.at("grading_data", default:none)
 #let annotated_scan_folder_name = sys.inputs.at("annotated_scan_folder", default:none)
+#let assn_page_counts_file_name = sys.inputs.at("assn_page_counts", default:none)
 #let include_correct_answers = sys.inputs.at("include_correct_answers", default:false)
 #assert(grading_data_file_name != none and annotated_scan_folder_name != none, message:"missing `grading_data` and `annotated_scan_folder` arguments")
+#assert(assn_page_counts_file_name != none, message:"missing `assn_page_counts` argument")
 #let grading_data = json(grading_data_file_name)
+#let assn_page_counts = json(assn_page_counts_file_name)
 
-#get_feedback_documents(grading_data, annotated_scan_folder_name, include_correct_answers)
+#get_feedback_documents(grading_data, annotated_scan_folder_name, include_correct_answers, assn_page_counts)

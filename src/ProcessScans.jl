@@ -603,6 +603,7 @@ function generate_marked_tiffs(
             page_info["identified"] = true
             page_info["assn_id"] = assn_id
             page_info["page"] = page
+            page_info["tiff_anchors"] = [[a[1], a[2]] for a in tiff_data[assn_id][page].tiff_anchors]
             
             if isnothing(current_assn_id)
                 current_assn_id = assn_id
@@ -674,6 +675,24 @@ function generate_marked_tiffs(
     # Save scan_results.json
     open(joinpath(output_dir, "scan_results.json"), "w") do f
         JSON.print(f, scan_results)
+    end
+    write_assn_page_counts(output_dir)
+    return nothing
+end
+
+function write_assn_page_counts(annotated_dir::String)::Nothing
+    annotated_dir = abspath(annotated_dir)
+    counts = Dict{String, Int}()
+    isdir(annotated_dir) || return nothing
+    for name in readdir(annotated_dir)
+        startswith(name, "assn_") || continue
+        dir = joinpath(annotated_dir, name)
+        isdir(dir) || continue
+        n = count(fname -> endswith(lowercase(fname), ".png"), readdir(dir))
+        counts[String(name[6:end])] = n
+    end
+    open(joinpath(dirname(annotated_dir), "assn_page_counts.json"), "w") do f
+        JSON.print(f, counts)
     end
     return nothing
 end

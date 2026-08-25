@@ -62,6 +62,7 @@ end
 function typst_compile_feedback_bundle(;
     grading_data_file::String,
     annotated_scan_folder::String,
+    assn_page_counts_file::String,
     output_dir::String,
     source_file::String=feedback_typst_file(),
 )::Nothing
@@ -71,6 +72,7 @@ function typst_compile_feedback_bundle(;
         "--format", "bundle",
         "--input", "grading_data=$grading_data_file",
         "--input", "annotated_scan_folder=$annotated_scan_folder",
+        "--input", "assn_page_counts=$assn_page_counts_file",
         "-",
         output_dir,
     ]

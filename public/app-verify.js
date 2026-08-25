@@ -151,9 +151,9 @@ function renderVerifyPage() {
     if (existingCorrection) {
         assnIdInput.value = existingCorrection.assn_id;
         pageNumInput.value = existingCorrection.page;
-        if (existingCorrection.tiff_anchors) {
-            verifyAnchors = [...existingCorrection.tiff_anchors];
-        }
+        verifyAnchors = Array.isArray(existingCorrection.tiff_anchors)
+            ? existingCorrection.tiff_anchors.map((a) => [...a])
+            : computerAnchorsForPage(page);
         status.textContent = "Corrected (Pending Finalize)";
         status.style.color = "#d97706"; // Amber
     } else if (page.identified && page.anchors_ok !== false) {
@@ -161,18 +161,18 @@ function renderVerifyPage() {
         pageNumInput.value = page.page;
         status.textContent = "Identified";
         status.style.color = "#16a34a";
+        verifyAnchors = computerAnchorsForPage(page);
     } else {
         if (page.identified) {
             assnIdInput.value = page.assn_id;
             pageNumInput.value = page.page;
             status.textContent = "Anchors failed — enter ID/page and mark anchors";
+            verifyAnchors = computerAnchorsForPage(page);
         } else {
             assnIdInput.value = page.decoded_assn_id ?? "";
             pageNumInput.value = page.decoded_page ?? "";
             status.textContent = unidentifiedStatusText(page);
-            if (Array.isArray(page.tiff_anchors)) {
-                verifyAnchors = page.tiff_anchors.map((a) => [...a]);
-            }
+            verifyAnchors = computerAnchorsForPage(page);
         }
         status.style.color = "#dc2626";
     }
@@ -187,57 +187,59 @@ function renderVerifyPage() {
     focusNavSentinel('verify-focus-sentinel');
 }
 
+function computerAnchorsForPage(page) {
+    if (!Array.isArray(page?.tiff_anchors)) return [];
+    return page.tiff_anchors.map((a) => [...a]);
+}
+
 function handleVerifyClick(e) {
-    if (verifyAnchors.length >= 14) {
-        // Reset if clicking again after 14
-        verifyAnchors = [];
-    }
     const img = e.target;
     const rect = img.getBoundingClientRect();
-    
-    // Calculate click coordinates relative to the original image dimensions
     const scaleX = img.naturalWidth / rect.width;
     const scaleY = img.naturalHeight / rect.height;
-    
     const x = (e.clientX - rect.left) * scaleX;
     const y = (e.clientY - rect.top) * scaleY;
-    
-    verifyAnchors.push([x, y]);
+    const hitR2 = 18 * 18;
+    const hitIndex = verifyAnchors.findIndex(([ax, ay]) => {
+        const dx = (ax - x) / scaleX;
+        const dy = (ay - y) / scaleY;
+        return (dx * dx + dy * dy) <= hitR2;
+    });
+    if (hitIndex >= 0) {
+        verifyAnchors.splice(hitIndex, 1);
+    } else if (verifyAnchors.length < 14) {
+        verifyAnchors.push([x, y]);
+    }
     drawVerifyAnchors();
 }
 
-function clearVerifyAnchors() {
-    verifyAnchors = [];
+function resetVerifyAnchors() {
+    const page = verifyScanResults[currentVerifyIndex];
+    verifyAnchors = computerAnchorsForPage(page);
     drawVerifyAnchors();
 }
 
 function drawVerifyAnchors() {
     const overlay = document.getElementById('verify-anchors-overlay');
     const img = document.getElementById('verify-img');
+    const countEl = document.getElementById('verify-anchor-count');
     overlay.innerHTML = '';
-    
+    if (countEl) countEl.textContent = String(verifyAnchors.length);
+
     if (!img.naturalWidth || img.naturalWidth === 0) return;
 
-    // Use the same getBoundingClientRect space as click handling so markers
-    // stay aligned even when clientWidth and CSS layout width diverge.
     const imgRect = img.getBoundingClientRect();
     const overlayRect = overlay.getBoundingClientRect();
     const scaleX = imgRect.width / img.naturalWidth;
     const scaleY = imgRect.height / img.naturalHeight;
     const offsetX = imgRect.left - overlayRect.left;
     const offsetY = imgRect.top - overlayRect.top;
-    
-    verifyAnchors.forEach((pt, i) => {
+
+    verifyAnchors.forEach((pt) => {
         const marker = document.createElement('div');
         marker.className = 'verify-anchor-marker';
         marker.style.left = `${offsetX + pt[0] * scaleX}px`;
         marker.style.top = `${offsetY + pt[1] * scaleY}px`;
-        
-        const label = document.createElement('div');
-        label.className = 'verify-anchor-label';
-        label.textContent = i + 1;
-        
-        marker.appendChild(label);
         overlay.appendChild(marker);
     });
 }

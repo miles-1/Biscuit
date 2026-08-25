@@ -15,9 +15,10 @@ export sanitize_class_name
 export write_sanitized_roster_csv
 export read_roster_table
 export roster_has_id
+export roster_has_section
 export roster_has_email
 
-const ROSTER_COLUMNS = ("Student", "ID", "Email")
+const ROSTER_COLUMNS = ("Student", "ID", "Section", "Email")
 
 function classes_dir()::String
     return joinpath(config_dir(), "classes")
@@ -60,8 +61,8 @@ function _resolve_roster_header(namemap::Dict, canonical::AbstractString)::Union
 end
 
 """
-Read a roster CSV into a NamedTuple of columns using Canvas headers (`Student`, optional `ID`
-and `Email`). Drops a Canvas "Points Possible" row if present, and drops a trailing
+Read a roster CSV into a NamedTuple of columns using Canvas headers (`Student`, optional `ID`,
+`Section`, and `Email`). Drops a Canvas "Points Possible" row if present, and drops a trailing
 `Student, Test` row if present.
 """
 function read_roster_table(source_path::AbstractString)::NamedTuple
@@ -79,9 +80,11 @@ function read_roster_table(source_path::AbstractString)::NamedTuple
 
     student_vals = String[]
     id_vals = haskey(resolved, "ID") ? Vector{Any}() : nothing
+    section_vals = haskey(resolved, "Section") ? Vector{Any}() : nothing
     email_vals = haskey(resolved, "Email") ? Vector{Any}() : nothing
     student_src = resolved["Student"]
     id_src = get(resolved, "ID", nothing)
+    section_src = get(resolved, "Section", nothing)
     email_src = get(resolved, "Email", nothing)
 
     for row in table
@@ -93,6 +96,9 @@ function read_roster_table(source_path::AbstractString)::NamedTuple
         if id_vals !== nothing
             push!(id_vals, _roster_cell(row[id_src]))
         end
+        if section_vals !== nothing
+            push!(section_vals, _roster_cell(row[section_src]))
+        end
         if email_vals !== nothing
             push!(email_vals, _roster_cell(row[email_src]))
         end
@@ -101,21 +107,24 @@ function read_roster_table(source_path::AbstractString)::NamedTuple
     if !isempty(student_vals) && _is_test_student_name(student_vals[end])
         pop!(student_vals)
         id_vals !== nothing && pop!(id_vals)
+        section_vals !== nothing && pop!(section_vals)
         email_vals !== nothing && pop!(email_vals)
     end
 
     cols = Pair{Symbol, Any}[:Student => student_vals]
     id_vals !== nothing && push!(cols, :ID => id_vals)
+    section_vals !== nothing && push!(cols, :Section => section_vals)
     email_vals !== nothing && push!(cols, :Email => email_vals)
     return NamedTuple(cols)
 end
 
 roster_has_id(table)::Bool = table !== nothing && haskey(table, :ID)
+roster_has_section(table)::Bool = table !== nothing && haskey(table, :Section)
 roster_has_email(table)::Bool = table !== nothing && haskey(table, :Email)
 
 """
-Read a user-provided roster CSV, require `Student`, keep only Student/ID/Email, drop a
-Canvas "Points Possible" row and a trailing `Student, Test` row if present, and write it
+Read a user-provided roster CSV, require `Student`, keep Student plus optional ID/Section/Email,
+drop a Canvas "Points Possible" row and a trailing `Student, Test` row if present, and write it
 to `dest_path`.
 """
 function write_sanitized_roster_csv(source_path::AbstractString, dest_path::AbstractString)
@@ -124,12 +133,14 @@ function write_sanitized_roster_csv(source_path::AbstractString, dest_path::Abst
     n = length(table.Student)
     headers = String["Student"]
     roster_has_id(table) && push!(headers, "ID")
+    roster_has_section(table) && push!(headers, "Section")
     roster_has_email(table) && push!(headers, "Email")
     col_syms = Tuple(Symbol.(headers))
     rows = [
         NamedTuple{col_syms}(Tuple(
             h == "Student" ? table.Student[i] :
             h == "ID" ? table.ID[i] :
+            h == "Section" ? table.Section[i] :
             table.Email[i]
             for h in headers
         ))

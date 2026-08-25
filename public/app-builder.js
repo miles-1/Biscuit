@@ -402,6 +402,7 @@ function renderBuilderUI() {
 
     container.innerHTML = html;
     attachBuilderEventListeners();
+    if (typeof enhanceTypstMarkupFields === "function") enhanceTypstMarkupFields(container);
 }
 
 function renderTopLevelSettingsHtml() {
@@ -1360,13 +1361,19 @@ function zoomPreview(delta) {
 function openSaveMasterModal() {
     const modal = document.getElementById('save-master-modal');
     if (!modal) return;
-    const input = document.getElementById('save-master-path-input');
-    if (input) {
-        const titleStem = (builderState.master.title || 'assignment')
-            .toLowerCase()
-            .replace(/[^a-z0-9_-]+/g, '_')
-            .replace(/^_+|_+$/g, '');
-        input.value = builderState.filePath || `practice/${titleStem || 'exam'}.json`;
+    const nameInput = document.getElementById('save-master-name-input');
+    const folderInput = document.getElementById('save-master-folder-input');
+    const titleStem = (builderState.master.title || 'assignment')
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]+/g, '_')
+        .replace(/^_+|_+$/g, '') || 'exam';
+    if (builderState.filePath) {
+        const parts = splitPath(builderState.filePath);
+        if (nameInput) nameInput.value = parts.file || `${titleStem}.json`;
+        if (folderInput) folderInput.value = (!parts.dir || parts.dir === '.') ? '' : parts.dir;
+    } else {
+        if (nameInput) nameInput.value = `${titleStem}.json`;
+        if (folderInput) folderInput.value = '';
     }
     const status = document.getElementById('save-master-status');
     if (status) status.textContent = '';
@@ -1378,14 +1385,24 @@ function closeSaveMasterModal() {
     if (modal) modal.classList.add('hidden');
 }
 
+function saveMasterPathFromFields() {
+    const nameInput = document.getElementById('save-master-name-input');
+    const folderInput = document.getElementById('save-master-folder-input');
+    let name = nameInput ? nameInput.value.trim() : '';
+    const folder = folderInput ? folderInput.value.trim() : '';
+    if (!name) return '';
+    if (!name.toLowerCase().endsWith('.json')) name += '.json';
+    if (!folder || folder === '.') return name;
+    return folder.replace(/[\\/]+$/, '') + '/' + name;
+}
+
 async function confirmSaveMaster() {
-    const input = document.getElementById('save-master-path-input');
     const status = document.getElementById('save-master-status');
-    const path = input ? input.value.trim() : '';
+    const path = saveMasterPathFromFields();
 
     if (!path) {
         if (status) {
-            status.textContent = 'Please enter a valid file path.';
+            status.textContent = 'Please enter a file name.';
             status.className = 'classes-modal-status error';
         }
         return;
