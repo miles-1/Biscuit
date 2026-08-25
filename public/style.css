@@ -850,13 +850,15 @@ input[type="number"].score-input {
     width: 100%;
 }
 .typst-highlight-wrap.is-input {
-    flex: 1;
     min-width: 0;
-}
-.typst-highlight-wrap:has(#builder-title) {
-    flex: 0 1 340px;
-    width: 340px;
+    width: max-content;
     max-width: 100%;
+}
+.builder-option-row > .typst-highlight-wrap.is-input,
+.builder-section-header > .typst-highlight-wrap.is-input {
+    flex: 1;
+    width: auto;
+    max-width: none;
 }
 .typst-highlight-wrap > .typst-highlight-pre,
 .typst-highlight-wrap > .typst-highlight-field {

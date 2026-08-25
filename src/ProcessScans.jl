@@ -104,6 +104,37 @@ function find_anchor_squares(image_3d::AbstractArray{UInt8, 3})::Vector{NTuple{2
     return tiff_anchors
 end
 
+# Real printed anchors sit near the page margin (~33% of page width apart). Clustered
+# detections or interior hits are almost always false positives.
+function anchors_have_implausible_geometry(
+    tiff_anchors::AbstractVector,
+    w::Real,
+    h::Real;
+    min_pair_frac::Float64=0.20,
+    max_edge_frac::Float64=0.10,
+)::Bool
+    w <= 0 && return false
+    min_pair = min_pair_frac * w
+    min_pair2 = min_pair * min_pair
+    max_edge = max_edge_frac * w
+    n = length(tiff_anchors)
+    for i in 1:n
+        (x, y) = tiff_anchors[i]
+        if min(x, y, w - x, h - y) > max_edge
+            return true
+        end
+        for j in (i + 1):n
+            (x2, y2) = tiff_anchors[j]
+            dx = x - x2
+            dy = y - y2
+            if dx * dx + dy * dy < min_pair2
+                return true
+            end
+        end
+    end
+    return false
+end
+
 function load_page_elements_data(page_elements_file::String)
     return Dict(
         parse(Int64, assn_id) => Dict(
@@ -228,8 +259,10 @@ function get_mapped_data(
             num_tiff_anchors = length(tiff_anchors)
             num_anchors = length(anchors)
             num_questions = length(q_heights)
-            # Reject too few detections, or more detections than PDF anchors (false positives).
-            is_major_anchor_mismatch = num_tiff_anchors < 6 || num_tiff_anchors > num_anchors
+            # Reject too few detections, more detections than PDF anchors, clustered
+            # detections, or hits that are not near a page edge.
+            bad_anchor_geometry = anchors_have_implausible_geometry(tiff_anchors, w, h)
+            is_major_anchor_mismatch = num_tiff_anchors < 6 || num_tiff_anchors > num_anchors || bad_anchor_geometry
             H = nothing
             if !is_major_anchor_mismatch && !isempty(anchors)
                 known_anchors = NTuple{2,Float64}[]
@@ -249,9 +282,13 @@ function get_mapped_data(
                 H, _ = cv.findHomography(src_pts, dst_pts; method=cv.RANSAC, ransacReprojThreshold=5.0)
             end
             if is_major_anchor_mismatch || isnothing(H) || isempty(H)
-                reason = is_major_anchor_mismatch ?
-                    "Homography skipped (found $num_tiff_anchors anchors; need 6-$num_anchors)" :
+                reason = if bad_anchor_geometry
+                    "Homography skipped (implausible anchor geometry)"
+                elseif num_tiff_anchors < 6 || num_tiff_anchors > num_anchors
+                    "Homography skipped (found $num_tiff_anchors anchors; need 6-$num_anchors)"
+                else
                     "Homography calculation failed"
+                end
                 println(" "^4 * "$reason — leaving page $p_indx unscanned (fix anchors via Verify Scans).")
                 mapped_assn_id_data[p_indx] = (; num_tiff_anchors, num_questions)
                 continue
