@@ -6,4 +6,12 @@
 - [ ] get rid of "choose one option"?
 - [ ] fix default path save option for master json to not be practice or whatever
 - [ ] user does not call close
-- [ ] change algorithm to remove false detect anchor in data matrix
+- [ ] change algorithm to remove false detect anchor in data matrix?
+    - [ ] just allow discard of detected anchor?
+- [ ] add "thanks, [name]!" option in template
+- [ ] partial feedback template entry or something
+- [ ] "assume all full points" option
+- [ ] save feedback window resize by question?
+- [ ] export name pics for more training data
+- [ ] retain Section in csv for canvas
+- [ ] change header in csv from Assignment Scores to actual name

@@ -77,7 +77,7 @@
 
       #place(top+right, dx:0.8cm, dy:-0.8cm, text(luma(50%))[Generated #datetime.today().display("[day] [month repr:short] [year]")])
 
-      #title[Feedback for #student_name.split(",").rev().join(" ")]
+      #title[Feedback for #student_name.replace(", ", ",").split(",").rev().join(" ")]
 
       = How to Read This Document
 
