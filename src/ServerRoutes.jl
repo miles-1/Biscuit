@@ -948,13 +948,14 @@ end
         selection_rel = replace(relpath(selection_file), "\\" => "/")
         source_file = Commands.assn_typst_file()
         out_pattern = joinpath(preview_dir, "page-{p}.png")
+        will_print_double_sided = Bool(get(master_data, "will_print_double_sided", true))
 
         args = [
             "compile",
             "--input", "master=$master_rel",
             "--input", "selection=$selection_rel",
             "--input", "single_doc_export=true",
-            "--input", "will_print_double_sided=false",
+            "--input", "will_print_double_sided=$will_print_double_sided",
             "--ppi", "144",
             "-",
             out_pattern,

@@ -5,6 +5,9 @@
 - [ ] user does not call close on web socket
 - [ ] partial feedback template entry or something
 - [ ] export name pics for more training data
+- [ ] feedback textarea bug with bottom not adjusting correctly
+- [ ] Section name not exactly copied
+- [ ] names that are not matched can still be uploaded to drive just no sharing
 
 COMPLETED, UNTESTED
 - [x] use typst prism to style text while writing
