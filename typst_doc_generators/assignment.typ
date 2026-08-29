@@ -346,43 +346,44 @@
             ..options
           )
         }
-        context if single_doc_export and v == versions.last() {
-          let page_elems = (:)
-          let el_types_and_shift = (
-            "anchor": 2.5pt, // width of anchor is 5pt
-            "bubble": 4pt, // radius of bubble is 4pt
-            "q_height": 0pt, 
-            "name_box_corner": 0pt,
-            "name_field_corner": 0pt,
-          )
-          let query_results = for el_type in el_types_and_shift.keys() {query(label(el_type)).map(i=>(el_type, i))}
-          for (el_type, el) in query_results {
-            let el_loc = el.location()
-            let assn_id_int = assn_id_state.at(el_loc)
-            if assn_id_int < 0 {continue}
-            let assn_id = str(assn_id_int)
-            let p_indx = str(counter(page).at(el_loc).first())
-            if assn_id not in page_elems {page_elems.insert(assn_id, (:))}
-            if p_indx not in page_elems.at(assn_id) {page_elems.at(assn_id).insert(p_indx, (:))}
-            if el_type + "s" not in page_elems.at(assn_id).at(p_indx) {page_elems.at(assn_id).at(p_indx).insert(el_type + "s", ())}
-            let shift = el_types_and_shift.at(el_type)
-            let (x,y) = el_loc.position()
-            page_elems.at(assn_id).at(p_indx).at(el_type + "s").push((x+shift,y+shift))
-          }
-          [#metadata(page_elems)<page_elems>]
-          [#metadata(var_answers_state.final())<var_answers>]
-        } 
-        if will_print_double_sided and not is_key {
-          let end_label = label("end-of-doc" + str(assn_id))
-          [#box() #end_label]
+        if will_print_double_sided {
+          if single_doc_export {pagebreak()}
+          let end_label = label("end-of-doc" + str(if assn_id != none {assn_id} else {"_key"}))
+          [#box()#end_label]
           context {
             let final_page = counter(page).at(end_label).first()
-            if calc.odd(final_page) {pagebreak(to:"even")}
+            if calc.odd(final_page) {pagebreak()}
           }
         }
       }
     )
   }
+  context if single_doc_export {
+    let page_elems = (:)
+    let el_types_and_shift = (
+      "anchor": 2.5pt, // width of anchor is 5pt
+      "bubble": 4pt, // radius of bubble is 4pt
+      "q_height": 0pt, 
+      "name_box_corner": 0pt,
+      "name_field_corner": 0pt,
+    )
+    let query_results = for el_type in el_types_and_shift.keys() {query(label(el_type)).map(i=>(el_type, i))}
+    for (el_type, el) in query_results {
+      let el_loc = el.location()
+      let assn_id_int = assn_id_state.at(el_loc)
+      if assn_id_int < 0 {continue}
+      let assn_id = str(assn_id_int)
+      let p_indx = str(counter(page).at(el_loc).first())
+      if assn_id not in page_elems {page_elems.insert(assn_id, (:))}
+      if p_indx not in page_elems.at(assn_id) {page_elems.at(assn_id).insert(p_indx, (:))}
+      if el_type + "s" not in page_elems.at(assn_id).at(p_indx) {page_elems.at(assn_id).at(p_indx).insert(el_type + "s", ())}
+      let shift = el_types_and_shift.at(el_type)
+      let (x,y) = el_loc.position()
+      page_elems.at(assn_id).at(p_indx).at(el_type + "s").push((x+shift,y+shift))
+    }
+    [#metadata(page_elems)<page_elems>]
+    [#metadata(var_answers_state.final())<var_answers>]
+  } 
 }
 
 #let master_file_name = sys.inputs.at("master", default:none)
