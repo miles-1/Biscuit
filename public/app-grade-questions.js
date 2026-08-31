@@ -1,8 +1,6 @@
 // Grade Assignments - Input Grades step: per-question/per-assn navigation, answer scoring, the
 // bubble/rubric/manual-score UI, and saving the finished work back to the archive.
 
-let persistedFeedbackTextareaHeight = null;
-
 function studentFirstName(fullName) {
     if (fullName == null) return null;
     const s = String(fullName).trim();
@@ -965,19 +963,15 @@ async function renderGradeStep() {
     const feedbackInput = document.createElement('textarea');
     feedbackInput.id = `feedback-input-${currentQIndex}-${currentAssnIndexForQ}`;
     feedbackInput.classList.add("feedback-input");
-    feedbackInput.value = currentItem.feedback || "";
-    if (persistedFeedbackTextareaHeight) {
-        feedbackInput.style.height = `${persistedFeedbackTextareaHeight}px`;
-    }
-    feedbackInput.oninput = (e) => {currentItem.feedback = e.target.value;};
-    const persistFeedbackHeight = () => {
-        const h = feedbackInput.getBoundingClientRect().height;
-        if (h > 0) persistedFeedbackTextareaHeight = h;
+    const adjustFeedbackHeight = () => {
+        feedbackInput.style.height = 'auto';
+        feedbackInput.style.height = `${feedbackInput.scrollHeight}px`;
     };
-    feedbackInput.addEventListener('mouseup', persistFeedbackHeight);
-    if (typeof ResizeObserver !== 'undefined') {
-        new ResizeObserver(persistFeedbackHeight).observe(feedbackInput);
-    }
+    feedbackInput.oninput = (e) => {
+        currentItem.feedback = e.target.value;
+        adjustFeedbackHeight();
+    };
+    requestAnimationFrame(adjustFeedbackHeight);
     feedbackWrap.appendChild(feedbackLabel);
     feedbackWrap.appendChild(feedbackInput);
     if (typeof enhanceTypstMarkupFields === 'function') enhanceTypstMarkupFields(feedbackWrap);

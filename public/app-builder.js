@@ -1349,15 +1349,6 @@ function renderPreviewPane() {
     `;
 }
 
-function zoomPreview(delta) {
-    if (delta === 0) {
-        builderState.previewZoom = 1.0;
-    } else {
-        builderState.previewZoom = Math.max(0.4, Math.min(2.5, (builderState.previewZoom || 1.0) + delta));
-    }
-    renderPreviewPane();
-}
-
 function openSaveMasterModal() {
     const modal = document.getElementById('save-master-modal');
     if (!modal) return;

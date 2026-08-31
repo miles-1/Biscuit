@@ -2,13 +2,14 @@
 - [ ] user does not call close on web socket
 - [ ] partial feedback template entry or something
 - [ ] export name pics for more training data
-- [ ] feedback textarea bug with bottom not adjusting correctly
-- [ ] Section name not exactly copied
 - [ ] names that are not matched can still be uploaded to drive just no sharing
+- [ ] as part of name training, attach images folder to class (same name for folder), add to names with new assignments, store namereader there, checkbox for process scans, "sharpen" training
+- [ ] feedback textarea bug with bottom not adjusting correctly
 - [ ] get rid of 100% + - for assignment builder
 
 
 SKIPPED
+- [ ] Section name not exactly copied
 - [ ] get rid of "choose one option"?
 
 COMPLETED, UNTESTED

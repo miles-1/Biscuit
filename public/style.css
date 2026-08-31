@@ -325,7 +325,6 @@ input[type="text"], input[type="number"], textarea {
     color: var(--text);
     border: 1px solid var(--border);
 }
-textarea.feedback-input { width: 100%; }
 button {
     padding: 5px 15px;
     cursor: pointer;
@@ -726,7 +725,7 @@ input[type="number"].score-input {
 
 .feedback-container { margin-top: 14px; }
 .feedback-label { font-weight: bold; }
-.feedback-input { width: 100%; min-height: 80px; }
+.feedback-input { width: 100%; min-height: 80px; overflow-y: hidden; resize: none; }
 .feedback-template-save {
     display: block;
     margin: 8px auto 0;
@@ -1108,11 +1107,6 @@ hr { border: none; border-top: 1px solid var(--border); }
     font-size: 0.88rem;
     font-weight: 600;
     color: var(--text-muted);
-}
-.builder-preview-zoom-controls {
-    display: flex;
-    gap: 4px;
-    align-items: center;
 }
 .builder-preview-container {
     flex: 1;
