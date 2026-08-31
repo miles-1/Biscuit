@@ -12,6 +12,7 @@
 #let get_all(dict, ..keys, default:none) = for k in keys.pos() {((k, dict.at(k, default:default)),)}.to-dict()
 #let apply(val_or_array, func) = if type(val_or_array) == array {val_or_array.map(func)} else {func(val_or_array)}
 #let linspace(start, end, count) = range(count).map(i => {start + i * (end - start) / (count - 1)})
+#let lpad(body, length, char: "0") = {let string = str(body); while string.len() < length {string = char + string}; return string}
 #let eval_mkup(string, global_vars:none, vars:none, secondary_vars:none, type:none) = {
   let scope = if std.type(global_vars) == dictionary {global_vars} else {(:)}
   scope += vars + secondary_vars
@@ -273,7 +274,7 @@
     let assn_id = v.at("assn_id", default:none)
     if assn_id != none {assn_id_state.update(assn_id)}
     make_doc(
-      "assn_" + if assn_id != none {str(assn_id)} else {"_key"} + ".pdf",
+      "assn_" + if assn_id != none {lpad(assn_id)} else {"_key"} + ".pdf",
       {
         total_q_counter.update(0)
         section_q_counter.update(0)
