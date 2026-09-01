@@ -4,8 +4,9 @@
 - [ ] export name pics for more training data
 - [ ] names that are not matched can still be uploaded to drive just no sharing
 - [ ] as part of name training, attach images folder to class (same name for folder), add to names with new assignments, store namereader there, checkbox for process scans, "sharpen" training
-- [ ] feedback textarea bug with bottom not adjusting correctly
-- [ ] get rid of 100% + - for assignment builder
+- [ ] save most recently opened folder for modal
+- [x] feedback textarea bug with bottom not adjusting correctly
+- [x] get rid of 100% + - for assignment builder
 
 
 SKIPPED

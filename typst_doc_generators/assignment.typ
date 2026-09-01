@@ -202,6 +202,7 @@
 #let get_single_selected_question(m_q, s_q, id:"", global_vars:none, is_key:false) = {
   let (option_permutation, vars, type) = get_all(s_q, "option_permutation", "vars", "type")
   let (secondary_vars, type, options, correct_answer) = get_all(m_q, "secondary_vars", "type", "options", "correct_answer")
+  let is_eval_mkup = not is_key or vars == none
   if std.type(vars) == dictionary {
     m_q.vars = vars
     if std.type(secondary_vars) == dictionary {
@@ -213,18 +214,18 @@
       m_q.secondary_vars = secondary_vars
     }
   }
-  if not is_key {
+  if is_eval_mkup {
     m_q.body = eval_mkup(m_q.body, global_vars:global_vars, vars:vars, secondary_vars:secondary_vars, type:type)
   }
   if options != none {
     if option_permutation != none {
       options = option_permutation.map(i=>options.at(i))
     }
-    if not is_key {
+    if is_eval_mkup {
       m_q.options = options.map(eval_mkup.with(global_vars:global_vars, vars:vars, secondary_vars:secondary_vars))
     }
   }
-  if correct_answer != none and not is_key and type in ("essay", "fill_blank") {
+  if correct_answer != none and is_eval_mkup and type in ("essay", "fill_blank") {
     m_q.correct_answer = apply(correct_answer, eval_mkup.with(global_vars:global_vars, vars:vars, secondary_vars:secondary_vars))
   }
   m_q.insert("id", id)
@@ -274,14 +275,12 @@
     let assn_id = v.at("assn_id", default:none)
     if assn_id != none {assn_id_state.update(assn_id)}
     make_doc(
-      "assn_" + if assn_id != none {lpad(assn_id)} else {"_key"} + ".pdf",
+      "assn_" + if assn_id != none {lpad(assn_id, 4)} else {"_key"} + ".pdf",
       {
         total_q_counter.update(0)
         section_q_counter.update(0)
-        if single_doc_export {
-          counter(page).update(1)
-          counter(heading).update(0)
-        }
+        counter(page).update(1)
+        counter(heading).update(0)
         set page(
           background: context if is_key {
             place(center+top, dy:15pt, text(30pt, red, strong[KEY]))
@@ -348,9 +347,9 @@
           )
         }
         if will_print_double_sided {
-          if single_doc_export {pagebreak()}
           let end_label = label("end-of-doc" + str(if assn_id != none {assn_id} else {"_key"}))
           [#box()#end_label]
+          if single_doc_export and v != versions.last() {pagebreak()}
           context {
             let final_page = counter(page).at(end_label).first()
             if calc.odd(final_page) {pagebreak()}
