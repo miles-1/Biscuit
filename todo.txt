@@ -5,8 +5,7 @@
 - [ ] names that are not matched can still be uploaded to drive just no sharing
 - [ ] as part of name training, attach images folder to class (same name for folder), add to names with new assignments, store namereader there, checkbox for process scans, "sharpen" training
 - [ ] save most recently opened folder for modal
-- [x] feedback textarea bug with bottom not adjusting correctly
-- [x] get rid of 100% + - for assignment builder
+- [ ] fold JSON3 and JSON into just using one package
 
 
 SKIPPED
@@ -14,6 +13,8 @@ SKIPPED
 - [ ] get rid of "choose one option"?
 
 COMPLETED, UNTESTED
+- [x] feedback textarea bug with bottom not adjusting correctly
+- [x] get rid of 100% + - for assignment builder
 - [x] looks like sometimes num pages is different between single export and by-doc export, but only when the content ends at the end of an even page?
 - [x] pad zeros with assn file names?
 - [x] use typst prism to style text while writing

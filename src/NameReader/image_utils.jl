@@ -1,6 +1,6 @@
 using Colors
 using FileIO
-using ImageMorphology
+import OpenCV as cv
 
 const DEFAULT_IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff")
 
@@ -200,18 +200,41 @@ function thin_image(
         Float64(Gray(pixel)) < cutoff
     end
     foreground = remove_isolated_foreground(foreground; radius=isolated_pixel_radius)
-    foreground = close_foreground(foreground; radius=morphology_radius)
-    thinned = thinning(foreground)
-    return map(thinned) do is_foreground
-        Gray{Float32}(is_foreground ? 0.0f0 : 1.0f0)
+    h, w = size(foreground)
+    cv_img = reshape(UInt8.(foreground) .* 0xFF, 1, h, w)
+    if morphology_radius > 0
+        cv_img = close_foreground_cv(cv_img, morphology_radius)
+    end
+    skel = zeros(UInt8, 1, h, w)
+    element = cv.getStructuringElement(cv.MORPH_CROSS, cv.Size(Int32(3), Int32(3)))
+    done = false
+    while !done
+        eroded = cv.erode(cv_img, element)
+        temp = cv.dilate(eroded, element)
+        subtracted = cv.subtract(cv_img, temp)
+        skel = cv.bitwise_or(skel, subtracted)
+        cv_img = eroded
+        if cv.countNonZero(cv_img) == 0
+            done = true
+        end
+    end
+    skel_2d = dropdims(skel, dims=1)
+    return map(skel_2d) do val
+        Gray{Float32}(val > 0 ? 0.0f0 : 1.0f0)
     end
 end
 
-function close_foreground(foreground::AbstractArray{Bool}; radius::Integer=0)
+function close_foreground_cv(img_uint8, radius::Integer)
     radius >= 0 || throw(ArgumentError("morphology_radius must be non-negative"))
-    radius == 0 && return foreground
-
-    return erode(dilate(foreground; r=radius); r=radius)
+    radius == 0 && return img_uint8
+    
+    # Create a square kernel based on the radius
+    ksize = Int32(2 * radius + 1)
+    element = cv.getStructuringElement(cv.MORPH_RECT, cv.Size(ksize, ksize))
+    
+    dilated = cv.dilate(img_uint8, element)
+    closed = cv.erode(dilated, element)
+    return closed
 end
 
 function remove_isolated_foreground(foreground::AbstractMatrix{Bool}; radius::Integer=0)
