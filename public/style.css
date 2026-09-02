@@ -900,6 +900,10 @@ input[type="number"].score-input {
     resize: vertical;
     overflow: auto;
 }
+.typst-highlight-wrap.is-textarea .feedback-input {
+    resize: none;
+    overflow: hidden;
+}
 .typst-highlight-wrap.is-textarea .typst-highlight-pre {
     overflow: hidden;
 }

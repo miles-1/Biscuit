@@ -963,6 +963,7 @@ async function renderGradeStep() {
     const feedbackInput = document.createElement('textarea');
     feedbackInput.id = `feedback-input-${currentQIndex}-${currentAssnIndexForQ}`;
     feedbackInput.classList.add("feedback-input");
+    feedbackInput.value = currentItem.feedback || "";
     const adjustFeedbackHeight = () => {
         feedbackInput.style.height = 'auto';
         feedbackInput.style.height = `${feedbackInput.scrollHeight}px`;
@@ -971,7 +972,6 @@ async function renderGradeStep() {
         currentItem.feedback = e.target.value;
         adjustFeedbackHeight();
     };
-    requestAnimationFrame(adjustFeedbackHeight);
     feedbackWrap.appendChild(feedbackLabel);
     feedbackWrap.appendChild(feedbackInput);
     if (typeof enhanceTypstMarkupFields === 'function') enhanceTypstMarkupFields(feedbackWrap);
@@ -998,6 +998,7 @@ async function renderGradeStep() {
     feedbackWrap.appendChild(saveTemplateBtn);
     feedbackWrap.appendChild(templateList);
     optContainer.appendChild(feedbackWrap);
+    adjustFeedbackHeight();
 
     // Empty manual score → focus it; otherwise stay in nav mode (sentinel).
     requestAnimationFrame(() => {
@@ -1334,9 +1335,7 @@ function startDriveUploadWithPolicy(duplicatePolicy) {
         if (sawDone) {
             try { ws.close(1000, "Run complete"); } catch (e) { /* ignore */ }
             if (summaryPayload && summaryPayload.status === "success") {
-                refreshDetailedCsvAfterDriveUpload().finally(() => {
-                    showDriveUploadSummary(summaryPayload);
-                });
+                showDriveUploadSummary(summaryPayload);
             } else {
                 setExportModalContent({
                     title: "Upload Failed",
@@ -1354,18 +1353,6 @@ function startDriveUploadWithPolicy(duplicatePolicy) {
     ws.onclose = () => {
         // Summary handling is done when Done is received.
     };
-}
-
-async function refreshDetailedCsvAfterDriveUpload() {
-    try {
-        const csvRes = await fetch('/api/export_csv', { method: 'POST' });
-        let csvData = {};
-        try { csvData = await csvRes.json(); } catch (e) { /* ignore */ }
-        if (csvRes.ok && csvData.status === "success") {
-            exportModalState.detailedCsvPath = csvData.detailed_csv_path || exportModalState.detailedCsvPath;
-            exportModalState.scoresCsvPath = csvData.scores_csv_path || exportModalState.scoresCsvPath;
-        }
-    } catch (e) { /* keep the CSV written before upload */ }
 }
 
 function showDriveUploadSummary(data) {

@@ -506,7 +506,7 @@ function lookup_student_drive_folder_urls(
             folder = student_feedback_folder_name(cname, name)
             id = get(children, folder, nothing)
             id === nothing && continue
-            urls[name] = "https://drive.google.com/drive/folders/$(id)"
+            urls[name] = drive_folder_web_url(id)
         end
     catch
         return Dict{String, String}()
@@ -646,7 +646,7 @@ end
 """
 Resolve (or create) the type subfolder for one student under the class root.
 Shares the student folder only when newly created.
-Returns the quizzes|worksheets|exams folder id.
+Returns `(type_folder_id, student_folder_id)`.
 """
 function ensure_student_type_folder(
     headers::Vector{Pair{String, String}},
@@ -655,7 +655,7 @@ function ensure_student_type_folder(
     student_roster_name::AbstractString,
     recipient_email::AbstractString,
     assn_type::AbstractString,
-)::String
+)::Tuple{String, String}
     type_folder = drive_folder_for_assn_type(assn_type)
     student_folder = student_feedback_folder_name(class_name, student_roster_name)
     student_id, student_created = ensure_folder(headers, student_folder; parent_id=class_folder_id)
@@ -668,11 +668,15 @@ function ensure_student_type_folder(
     if type_created
         println("Created subfolder: $student_folder / $type_folder")
     end
-    return type_id
+    return (type_id, student_id)
 end
 
 function target_pdf_filename(assn_name::AbstractString)::String
     return endswith(assn_name, ".pdf") ? String(assn_name) : "$(assn_name).pdf"
+end
+
+function drive_folder_web_url(folder_id::AbstractString)::String
+    return "https://drive.google.com/drive/folders/$(folder_id)"
 end
 
 const DUPLICATE_POLICIES = Set(["replace", "skip", "add_new"])
@@ -688,6 +692,7 @@ end
 """
 Upload one local PDF into
 `Biscuit / class_name / [class_name] Assignment Feedback - [Display Name] / quizzes|worksheets|exams / assn.pdf`.
+Returns `(file_id, folder_url)`; `file_id` is `nothing` when an existing file is skipped.
 """
 function process_and_upload_pdf(
     headers::Vector{Pair{String, String}},
@@ -699,9 +704,9 @@ function process_and_upload_pdf(
     recipient_email::AbstractString,
     student_roster_name::AbstractString,
     duplicate_policy::AbstractString,
-)::Union{String, Nothing}
+)
     policy = normalize_duplicate_policy(duplicate_policy)
-    type_folder_id = ensure_student_type_folder(
+    type_folder_id, student_folder_id = ensure_student_type_folder(
         headers,
         class_folder_id,
         class_name,
@@ -709,13 +714,14 @@ function process_and_upload_pdf(
         recipient_email,
         assn_type,
     )
+    folder_url = drive_folder_web_url(student_folder_id)
     target_filename = target_pdf_filename(assn_name)
     existing = find_file_in_folder(headers, type_folder_id, target_filename)
 
     if !isnothing(existing)
         if policy == "skip"
             println("Skipped existing file: $target_filename")
-            return nothing
+            return (file_id=nothing, folder_url=folder_url)
         elseif policy == "replace"
             delete_drive_file(headers, existing.id)
             println("Replacing existing file: $target_filename")
@@ -730,7 +736,7 @@ function process_and_upload_pdf(
 
     uploaded_id = upload_pdf(headers, String(local_file_path), final_filename, type_folder_id)
     println("Successfully uploaded: $final_filename (ID: $uploaded_id)")
-    return uploaded_id
+    return (file_id=uploaded_id, folder_url=folder_url)
 end
 
 """
@@ -833,6 +839,7 @@ function upload_feedback_pdfs(
     skipped_no_email = Any[]
     skipped_duplicate = Any[]
     failed = Any[]
+    drive_folder_urls = Dict{String, String}()
 
     for pdf_name in pdf_files
         local_path = joinpath(feedback_dir, pdf_name)
@@ -850,7 +857,7 @@ function upload_feedback_pdfs(
                     "No class roster row matches sanitized name $(repr(pdf_stem))"
                 ))
             end
-            file_id = process_and_upload_pdf(
+            result = process_and_upload_pdf(
                 headers,
                 class_folder_id,
                 class_name,
@@ -861,18 +868,21 @@ function upload_feedback_pdfs(
                 student.name,
                 policy,
             )
-            if file_id === nothing
+            drive_folder_urls[student.name] = result.folder_url
+            if result.file_id === nothing
                 push!(skipped_duplicate, Dict(
                     "file" => pdf_name,
                     "name" => student.name,
                     "email" => student.email,
+                    "drive_folder_url" => result.folder_url,
                 ))
             else
                 push!(uploaded, Dict(
                     "file" => pdf_name,
                     "name" => student.name,
                     "email" => student.email,
-                    "drive_file_id" => file_id,
+                    "drive_file_id" => result.file_id,
+                    "drive_folder_url" => result.folder_url,
                 ))
             end
         catch e
@@ -891,6 +901,7 @@ function upload_feedback_pdfs(
         "total_pdfs" => length(pdf_files),
         "duplicate_policy" => policy,
         "class_name" => class_name,
+        "drive_folder_urls" => drive_folder_urls,
     )
 end
 

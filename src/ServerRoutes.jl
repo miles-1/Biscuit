@@ -791,6 +791,11 @@ end
                 ctx["class_name"];
                 duplicate_policy=duplicate_policy,
             )
+            try
+                patch_detailed_csv_drive_links_after_upload(summary)
+            catch e
+                println("Warning: could not add Google Drive links to the detailed CSV: $e")
+            end
             println("SUMMARY:" * JSON.json(Dict(
                 "status" => "success",
                 "summary" => summary,
@@ -827,6 +832,11 @@ end
             ctx["class_name"];
             duplicate_policy=duplicate_policy,
         )
+        try
+            patch_detailed_csv_drive_links_after_upload(summary)
+        catch e
+            @warn "Could not add Google Drive links to the detailed CSV" exception=e
+        end
         return Dict(
             "status" => "success",
             "summary" => summary,

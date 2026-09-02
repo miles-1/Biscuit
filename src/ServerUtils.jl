@@ -595,6 +595,16 @@ function _write_csv_rows(path::String, headers::Vector{String}, rows::Vector{Dic
     return nothing
 end
 
+function detailed_scores_csv_path(archive_path::AbstractString)::String
+    stem = first(splitext(basename(archive_path)))
+    return joinpath(dirname(archive_path), "$(stem)_detailed_scores.csv")
+end
+
+function scores_csv_path(archive_path::AbstractString)::String
+    stem = first(splitext(basename(archive_path)))
+    return joinpath(dirname(archive_path), "$(stem)_scores.csv")
+end
+
 # Write `_detailed_scores.csv` and `_scores.csv` next to the loaded .assn archive.
 # Returns (detailed_path, scores_path).
 function export_score_csvs(;
@@ -604,10 +614,8 @@ function export_score_csvs(;
     archive_path::String,
     class_name::Union{Nothing, AbstractString}=nothing,
 )::Tuple{String, String}
-    stem = first(splitext(basename(archive_path)))
-    out_dir = dirname(archive_path)
-    detailed_path = joinpath(out_dir, "$(stem)_detailed_scores.csv")
-    scores_path = joinpath(out_dir, "$(stem)_scores.csv")
+    detailed_path = detailed_scores_csv_path(archive_path)
+    scores_path = scores_csv_path(archive_path)
 
     master_qs = _flatten_master_questions_export(get(master, "questions", Any[]))
 
@@ -661,6 +669,15 @@ function export_score_csvs(;
     end
     has_email = !isempty(email_by_name)
 
+    id_by_name = Dict{String, Any}()
+    has_id = roster_has_id(students_table) && haskey(students_table, :Student)
+    if has_id
+        for (rname, id) in zip(students_table.Student, students_table.ID)
+            (ismissing(id) || id === nothing) && continue
+            id_by_name[string(rname)] = id
+        end
+    end
+
     drive_urls = lookup_student_drive_folder_urls(
         class_name,
         (name for (name, _, _) in detailed_entries),
@@ -668,6 +685,7 @@ function export_score_csvs(;
     has_drive = !isempty(drive_urls)
 
     detailed_headers = String["Student"]
+    has_id && push!(detailed_headers, "ID")
     has_email && push!(detailed_headers, "Email")
     has_drive && push!(detailed_headers, "Google Drive")
     push!(detailed_headers, "assn_id")
@@ -682,6 +700,9 @@ function export_score_csvs(;
             q_by_id[string(q["id"])] = q
         end
         row = Dict{String, Any}("Student" => name, "assn_id" => assn_id)
+        if has_id
+            row["ID"] = get(id_by_name, name, missing)
+        end
         if has_email
             row["Email"] = get(email_by_name, name, missing)
         end
@@ -764,4 +785,81 @@ function export_score_csvs(;
     )
 
     return (detailed_path, scores_path)
+end
+
+function _drive_url_for_student_name(name::AbstractString, urls_by_name)::Union{Nothing, String}
+    isempty(urls_by_name) && return nothing
+    exact = get(urls_by_name, String(name), nothing)
+    exact !== nothing && return String(exact)
+    key = sanitize_student_name(name)
+    isempty(key) && return nothing
+    for (n, url) in urls_by_name
+        sanitize_student_name(string(n)) == key && return String(url)
+    end
+    return nothing
+end
+
+# Insert or fill the Google Drive column on an existing detailed CSV. Other cells are left as-is.
+function update_detailed_csv_drive_links(path::String, urls_by_name)::Nothing
+    isfile(path) || throw(ArgumentError("detailed CSV not found: $path"))
+    table = CSV.File(path)
+    existing_headers = String[string(n) for n in propertynames(table)]
+    isempty(existing_headers) && return nothing
+    ("Student" in existing_headers) || throw(ArgumentError(
+        "detailed CSV is missing a Student column: $path"
+    ))
+
+    headers = copy(existing_headers)
+    drive_col = "Google Drive"
+    if !(drive_col in headers)
+        insert_at = if "Email" in headers
+            findfirst(isequal("Email"), headers) + 1
+        elseif "ID" in headers
+            findfirst(isequal("ID"), headers) + 1
+        else
+            findfirst(isequal("Student"), headers) + 1
+        end
+        insert!(headers, insert_at, drive_col)
+    end
+
+    rows = Dict{String, Any}[]
+    for row in table
+        d = Dict{String, Any}()
+        for h in existing_headers
+            d[h] = getproperty(row, Symbol(h))
+        end
+        url = _drive_url_for_student_name(string(get(d, "Student", "")), urls_by_name)
+        if url !== nothing
+            d[drive_col] = url
+        elseif !haskey(d, drive_col)
+            d[drive_col] = missing
+        end
+        push!(rows, d)
+    end
+    _write_csv_rows(path, headers, rows)
+    return nothing
+end
+
+function _coerce_drive_folder_urls(raw)::Dict{String, String}
+    urls = Dict{String, String}()
+    isa(raw, AbstractDict) || return urls
+    for (name, url) in raw
+        ns = strip(string(name))
+        us = strip(string(url))
+        (isempty(ns) || isempty(us)) && continue
+        urls[ns] = us
+    end
+    return urls
+end
+
+# After a Drive upload, add folder URLs to the already-written detailed CSV only.
+function patch_detailed_csv_drive_links_after_upload(summary)::Nothing
+    archive_path = get(STATE, "assn_archive_path", nothing)
+    isa(archive_path, AbstractString) && isfile(archive_path) || return nothing
+    urls = _coerce_drive_folder_urls(get(summary, "drive_folder_urls", nothing))
+    isempty(urls) && return nothing
+    path = detailed_scores_csv_path(String(archive_path))
+    isfile(path) || return nothing
+    update_detailed_csv_drive_links(path, urls)
+    return nothing
 end
