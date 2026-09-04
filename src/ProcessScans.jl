@@ -576,19 +576,21 @@ function get_answer_text(a)::String
     end 
 end
 
-function save_annotated_assn(marked_frames::Vector{Tuple{Int64, AbstractArray{UInt8, 3}}}, assn_id::Union{Int64, Nothing}; output_dir::String, scan_results::Vector{Dict{String, Any}})::Nothing
+function save_annotated_assn(
+    marked_frames::Vector{Tuple{Int64, AbstractArray{UInt8, 3}}},
+    assn_id::Union{Int64, Nothing};
+    output_dir::String,
+    scan_results::Vector{Dict{String, Any}},
+    name_by_ppage::Bool=false,
+)::Nothing
     if isempty(marked_frames) return nothing end
     dir_name = isnothing(assn_id) ? "unidentified" : "assn_$assn_id"
     test_dir = joinpath(output_dir, dir_name)
-    if isdir(test_dir)
-        rm(test_dir, recursive=true)
-    end
-    mkdir(test_dir)
+    mkpath(test_dir)
     for (i, (ppage_indx, frame)) in enumerate(marked_frames)
-        file_name = string(lpad(i, 4, '0'), ".png")
+        file_name = string(lpad(name_by_ppage ? ppage_indx : i, 4, '0'), ".png")
         file_path = joinpath(test_dir, file_name)
         cv.imwrite(file_path, frame)
-        # Update the scan result for this page
         for res in scan_results
             if res["ppage_indx"] == ppage_indx
                 res["image_path"] = joinpath(dir_name, file_name)
@@ -596,7 +598,6 @@ function save_annotated_assn(marked_frames::Vector{Tuple{Int64, AbstractArray{UI
             end
         end
     end
-    empty!(marked_frames)
     return nothing
 end
 
@@ -609,7 +610,6 @@ function generate_marked_tiffs(
     output_dir::String,
     identify_issues::Dict{Int64, Dict{String, Any}}=Dict{Int64, Dict{String, Any}}(),
 )::Nothing
-    marked_frames = Tuple{Int64, AbstractArray{UInt8, 3}}[]
     scan_results = Dict{String, Any}[]
     ret, pages = cv.imreadmulti(tiff_path; flags=cv.IMREAD_COLOR)
     if !ret
@@ -621,7 +621,13 @@ function generate_marked_tiffs(
         println("The folder $output_dir already existed, so it was deleted.")
     end
     mkdir(output_dir)
-    current_assn_id = nothing
+    # Collect every annotated frame first, then write each destination once.
+    # Streaming writes used to flush on unidentified pages, mix those frames into
+    # the next assignment, and delete the assignment folder on resume — so page 89's
+    # `assn_X/0001.png` was later overwritten with page 90's pixels.
+    identified_frames = Dict{Int64, Vector{Tuple{Int64, AbstractArray{UInt8, 3}, Int64}}}()
+    unidentified_frames = Tuple{Int64, AbstractArray{UInt8, 3}}[]
+    seen_assn = Set{Int64}()
     for (ppage_indx, frame_cv) in enumerate(pages)
         w, h = size(frame_cv, 2), size(frame_cv, 3)
         page_info = Dict{String, Any}(
@@ -642,13 +648,9 @@ function generate_marked_tiffs(
             page_info["page"] = page
             page_info["tiff_anchors"] = [[a[1], a[2]] for a in tiff_data[assn_id][page].tiff_anchors]
             
-            if isnothing(current_assn_id)
-                current_assn_id = assn_id
-                println("- Assn $current_assn_id...")
-            elseif assn_id != current_assn_id
-                save_annotated_assn(marked_frames, current_assn_id; output_dir, scan_results)
-                current_assn_id = assn_id
-                println("- Assn $current_assn_id...")
+            if assn_id ∉ seen_assn
+                push!(seen_assn, assn_id)
+                println("- Assn $assn_id...")
             end
             for a in tiff_data[assn_id][page].tiff_anchors
                 cv.drawMarker(frame_cv, cv.Point{Int32}(round(Int32, a[1]), round(Int32, a[2])), blue, markerType=cv.MARKER_SQUARE, markerSize=25, thickness=3)
@@ -690,12 +692,9 @@ function generate_marked_tiffs(
                 end
             end
             push!(scan_results, page_info)
-            push!(marked_frames, (ppage_indx, frame_cv))
+            push!(get!(Vector{Tuple{Int64, AbstractArray{UInt8, 3}, Int64}}, identified_frames, assn_id),
+                (ppage_indx, frame_cv, page))
         else
-            if !isnothing(current_assn_id)
-                save_annotated_assn(marked_frames, current_assn_id; output_dir, scan_results)
-                current_assn_id = nothing
-            end
             issue = get(identify_issues, ppage_indx, Dict{String, Any}("identify_error" => "no_datamatrix"))
             merge!(page_info, issue)
             blue = (155.0, 12.0, 30.0, 0.0)
@@ -704,10 +703,19 @@ function generate_marked_tiffs(
                 cv.drawMarker(frame_cv, cv.Point{Int32}(round(Int32, ax), round(Int32, ay)), blue, markerType=cv.MARKER_SQUARE, markerSize=25, thickness=3)
             end
             push!(scan_results, page_info)
-            push!(marked_frames, (ppage_indx, frame_cv))
+            push!(unidentified_frames, (ppage_indx, frame_cv))
         end
     end
-    save_annotated_assn(marked_frames, current_assn_id; output_dir, scan_results)
+    for assn_id in sort!(collect(keys(identified_frames)))
+        frames = identified_frames[assn_id]
+        sort!(frames; by = t -> (t[3], t[1]))
+        batch = Tuple{Int64, AbstractArray{UInt8, 3}}[]
+        for (ppage_indx, frame, _) in frames
+            push!(batch, (ppage_indx, frame))
+        end
+        save_annotated_assn(batch, assn_id; output_dir, scan_results)
+    end
+    save_annotated_assn(unidentified_frames, nothing; output_dir, scan_results, name_by_ppage=true)
     
     # Save scan_results.json
     open(joinpath(output_dir, "scan_results.json"), "w") do f
