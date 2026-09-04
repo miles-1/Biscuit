@@ -138,10 +138,13 @@ launcher_src = joinpath(@__DIR__, "src", "windows_launcher.cs")
 launcher_dest = joinpath(FINAL_APP_DIR, "$APP_NAME.exe")
 
 windir = get(ENV, "WINDIR", "C:\\Windows")
+# Prefer the .NET Framework csc so the launcher is a real Framework winexe with
+# WinForms. A PATH `csc` from the .NET SDK can produce an exe whose COM interop
+# (the old folder picker) fails immediately on launch.
 csc_candidates = [
-    Sys.which("csc"),
     joinpath(windir, "Microsoft.NET", "Framework64", "v4.0.30319", "csc.exe"),
     joinpath(windir, "Microsoft.NET", "Framework", "v4.0.30319", "csc.exe"),
+    Sys.which("csc"),
 ]
 found_csc = nothing
 for cand in csc_candidates
@@ -153,12 +156,24 @@ end
 
 if found_csc !== nothing
     icon_args = isfile(ico_dest) ? ["/win32icon:$ico_dest"] : String[]
+    csc_dir = dirname(found_csc)
+    framework_dir = joinpath(windir, "Microsoft.NET", "Framework64", "v4.0.30319")
+    forms_dll = joinpath(csc_dir, "System.Windows.Forms.dll")
+    drawing_dll = joinpath(csc_dir, "System.Drawing.dll")
+    isfile(forms_dll) || (forms_dll = joinpath(framework_dir, "System.Windows.Forms.dll"))
+    isfile(drawing_dll) || (drawing_dll = joinpath(framework_dir, "System.Drawing.dll"))
+    ref_args = String[]
+    isfile(forms_dll) && push!(ref_args, "/reference:$forms_dll")
+    isfile(drawing_dll) && push!(ref_args, "/reference:$drawing_dll")
+    isempty(ref_args) && error("System.Windows.Forms.dll not found; cannot compile the Windows launcher.")
     compile_cmd = Cmd([
         found_csc,
         "/nologo",
         "/target:winexe",
+        "/platform:x64",
         "/optimize+",
         icon_args...,
+        ref_args...,
         "/out:$launcher_dest",
         launcher_src,
     ])

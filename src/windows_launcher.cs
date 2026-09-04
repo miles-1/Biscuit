@@ -4,6 +4,7 @@ using System.Net;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Threading;
+using System.Windows.Forms;
 
 namespace BiscuitLauncher
 {
@@ -23,10 +24,6 @@ namespace BiscuitLauncher
         const int CTRL_CLOSE_EVENT = 2;
         const int CTRL_LOGOFF_EVENT = 5;
         const int CTRL_SHUTDOWN_EVENT = 6;
-        const uint FOS_PICKFOLDERS = 0x20;
-        const uint FOS_FORCEFILESYSTEM = 0x40;
-        const uint FOS_PATHMUSTEXIST = 0x800;
-        const uint SIGDN_FILESYSPATH = 0x80058000;
 
         static Process serverProcess;
         static string workspacePath;
@@ -44,6 +41,9 @@ namespace BiscuitLauncher
                 SetCurrentProcessExplicitAppUserModelID("com.biscuit.app");
             }
             catch { }
+
+            try { Application.EnableVisualStyles(); } catch { }
+            try { Application.SetCompatibleTextRenderingDefault(false); } catch { }
 
             appDir = AppDomain.CurrentDomain.BaseDirectory;
             string homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
@@ -103,40 +103,23 @@ namespace BiscuitLauncher
 
         static string PickFolder(string title, string initialPath)
         {
-            IFileDialog dialog = null;
             try
             {
-                dialog = (IFileDialog)new FileOpenDialog();
-                dialog.SetTitle(title);
-                dialog.SetOptions(FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST);
-                try
+                using (FolderBrowserDialog dialog = new FolderBrowserDialog())
                 {
+                    dialog.Description = title;
+                    dialog.ShowNewFolderButton = true;
                     if (!string.IsNullOrEmpty(initialPath) && Directory.Exists(initialPath))
-                    {
-                        IShellItem folder;
-                        if (SHCreateItemFromParsingName(initialPath, IntPtr.Zero, typeof(IShellItem).GUID, out folder) == 0)
-                            dialog.SetFolder(folder);
-                    }
+                        dialog.SelectedPath = initialPath;
+                    if (dialog.ShowDialog() != DialogResult.OK)
+                        return null;
+                    return dialog.SelectedPath;
                 }
-                catch { }
-                uint hr = dialog.Show(GetActiveWindow());
-                if (hr != 0)
-                    return null;
-                IShellItem result;
-                dialog.GetResult(out result);
-                string path;
-                result.GetDisplayName(SIGDN_FILESYSPATH, out path);
-                return path;
             }
-            catch
+            catch (Exception ex)
             {
-                NativeMessageBox("Could not open the folder picker.", "Biscuit Error");
+                NativeMessageBox("Could not open the folder picker.\n\n" + ex.Message, "Biscuit Error");
                 return null;
-            }
-            finally
-            {
-                if (dialog != null)
-                    Marshal.ReleaseComObject(dialog);
             }
         }
 
@@ -342,9 +325,6 @@ namespace BiscuitLauncher
         [DllImport("user32.dll")]
         static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 
-        [DllImport("user32.dll")]
-        static extern IntPtr GetActiveWindow();
-
         [DllImport("user32.dll", CharSet = CharSet.Unicode)]
         static extern int MessageBoxW(IntPtr hWnd, string text, string caption, uint type);
 
@@ -356,59 +336,5 @@ namespace BiscuitLauncher
 
         [DllImport("shell32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         static extern void SetCurrentProcessExplicitAppUserModelID(string appID);
-
-        [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)]
-        static extern int SHCreateItemFromParsingName(
-            [MarshalAs(UnmanagedType.LPWStr)] string pszPath,
-            IntPtr pbc,
-            [MarshalAs(UnmanagedType.LPStruct)] Guid riid,
-            out IShellItem ppv);
-
-        [ComImport]
-        [Guid("DC1C5A9C-E88A-4dde-A5A1-60F82A20AEF7")]
-        class FileOpenDialog { }
-
-        [ComImport]
-        [Guid("42f85136-db7e-439c-85f1-e4075f512fcb")]
-        [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-        interface IFileDialog
-        {
-            [PreserveSig] uint Show(IntPtr parent);
-            void SetFileTypes();
-            void SetFileTypeIndex(uint iFileType);
-            void GetFileTypeIndex(out uint piFileType);
-            void Advise();
-            void Unadvise();
-            void SetOptions(uint fos);
-            void GetOptions(out uint pfos);
-            void SetDefaultFolder(IShellItem psi);
-            void SetFolder(IShellItem psi);
-            void GetFolder(out IShellItem ppsi);
-            void GetCurrentSelection(out IShellItem ppsi);
-            void SetFileName([MarshalAs(UnmanagedType.LPWStr)] string pszName);
-            void GetFileName([MarshalAs(UnmanagedType.LPWStr)] out string pszName);
-            void SetTitle([MarshalAs(UnmanagedType.LPWStr)] string pszTitle);
-            void SetOkButtonLabel([MarshalAs(UnmanagedType.LPWStr)] string pszText);
-            void SetFileNameLabel([MarshalAs(UnmanagedType.LPWStr)] string pszLabel);
-            void GetResult(out IShellItem ppsi);
-            void AddPlace(IShellItem psi, int alignment);
-            void SetDefaultExtension([MarshalAs(UnmanagedType.LPWStr)] string pszDefaultExtension);
-            void Close(int hr);
-            void SetClientGuid();
-            void ClearClientData();
-            void SetFilter(IntPtr pFilter);
-        }
-
-        [ComImport]
-        [Guid("43826D1E-E718-42EE-BC55-A1E261C37BFE")]
-        [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-        interface IShellItem
-        {
-            void BindToHandler();
-            void GetParent();
-            void GetDisplayName(uint sigdnName, [MarshalAs(UnmanagedType.LPWStr)] out string ppszName);
-            void GetAttributes();
-            void Compare();
-        }
     }
 }
