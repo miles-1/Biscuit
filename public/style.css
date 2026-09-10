@@ -1181,6 +1181,52 @@ hr { border: none; border-top: 1px solid var(--border); }
     max-width: 100%;
     height: auto;
 }
+.builder-preview-question-card {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
+    max-width: 100%;
+    background: #fff;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    border-radius: 4px;
+    padding: 8px;
+    border: 1px solid var(--border);
+    box-sizing: border-box;
+}
+.builder-preview-question-card.is-updating {
+    opacity: 0.72;
+}
+.builder-preview-svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    background: #fff;
+}
+.builder-preview-error-inline {
+    margin-bottom: 10px;
+}
+.builder-shuffle-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px 16px;
+    align-items: center;
+    margin: 8px 0 4px;
+}
+.builder-shuffle-override {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.82rem;
+    color: var(--text-subtle);
+    font-weight: 600;
+}
+.builder-shuffle-select {
+    width: 108px !important;
+    height: 28px !important;
+    font-size: 0.82rem !important;
+    font-weight: 500;
+}
 
 /* --- Builder Right Pane & Form Hierarchy --- */
 .builder-right-pane {

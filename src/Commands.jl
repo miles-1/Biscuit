@@ -5,9 +5,11 @@ using ..Paths: package_root
 export typst_compile_assn
 export typst_query_assn
 export typst_compile_feedback_bundle
+export typst_compile_question_preview
 
 assn_typst_file() = joinpath(package_root(), "typst_doc_generators", "assignment.typ")
 feedback_typst_file() = joinpath(package_root(), "typst_doc_generators", "feedback.typ")
+question_preview_typst_file() = joinpath(package_root(), "typst_doc_generators", "question_preview.typ")
 
 function _run_typst_stdin(source_file::String, args::Vector{String})
     run(pipeline(source_file, `typst $args`))
@@ -77,6 +79,27 @@ function typst_compile_feedback_bundle(;
         output_dir,
     ]
     return _run_typst_stdin(source_file, args)
+end
+
+function typst_compile_question_preview(;
+    preview_json::String,
+    output_svg::String,
+    preview_root::String,
+    source_file::String=joinpath(preview_root, "question_preview.typ"),
+    stdout_io::IO=devnull,
+    stderr_io::IO=stderr,
+)::Nothing
+    args = [
+        "compile",
+        "--root", preview_root,
+        "--input", "preview=$(basename(preview_json))",
+        "--format", "svg",
+        basename(source_file),
+        basename(output_svg),
+    ]
+    cmd = pipeline(Cmd(`typst $args`; dir=preview_root), stdout=stdout_io, stderr=stderr_io)
+    run(cmd)
+    return nothing
 end
 
 end # module

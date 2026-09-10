@@ -5,7 +5,7 @@ using Random
 using ..ArchiveUtils
 using ..Commands
 
-export generate_assn_files, validate_master_json, validate_master_json_file
+export generate_assn_files, validate_master_json, validate_master_json_file, preview_selection_for_question
 
 ### Make selection.json ###
 
@@ -180,6 +180,15 @@ function _is_section_object(obj)::Bool
     return isa(obj, Dict) && haskey(obj, "section_title")
 end
 
+function _validate_optional_shuffle_flags(obj::Dict, path::String)::Nothing
+    for key in ("shuffle_questions", "shuffle_answers")
+        if haskey(obj, key) && !isa(obj[key], Bool)
+            _validation_error("$path.$key", "must be a boolean.")
+        end
+    end
+    return nothing
+end
+
 function _validate_question_object(q_obj, path::String)::Nothing
     if !isa(q_obj, Dict)
         _validation_error(path, "question must be an object.")
@@ -193,7 +202,7 @@ function _validate_question_object(q_obj, path::String)::Nothing
         _validation_error("$path.type", "must be one of `essay`, `fill_blank`, `multiple_choice`, or `true_false`.")
     end
 
-    common_allowed = Set(["type", "points", "body", "vars", "secondary_vars", "correct_answer"])
+    common_allowed = Set(["type", "points", "body", "vars", "secondary_vars", "correct_answer", "shuffle_questions", "shuffle_answers"])
     type_allowed = if q_type == "essay"
         union(common_allowed, Set(["rubric", "num_lines"]))
     elseif q_type == "fill_blank"
@@ -229,6 +238,8 @@ function _validate_question_object(q_obj, path::String)::Nothing
     if haskey(q_obj, "secondary_vars")
         _validate_secondary_vars_object(q_obj["secondary_vars"], "$path.secondary_vars")
     end
+
+    _validate_optional_shuffle_flags(q_obj, path)
 
     if q_type in ("essay", "fill_blank")
         if haskey(q_obj, "rubric")
@@ -317,7 +328,13 @@ function _validate_pick_object(pick_obj, path::String)::Nothing
     if !isa(pick_obj, Dict)
         _validation_error(path, "pick entry must be an object.")
     end
-    _require_allowed_and_required_keys(pick_obj, path, Set(["pick", "questions"]), Set(["pick", "questions"]))
+    _require_allowed_and_required_keys(
+        pick_obj,
+        path,
+        Set(["pick", "questions", "shuffle_questions", "shuffle_answers"]),
+        Set(["pick", "questions"]),
+    )
+    _validate_optional_shuffle_flags(pick_obj, path)
     pick_n = pick_obj["pick"]
     if !_is_integer(pick_n)
         _validation_error("$path.pick", "must be an integer between 1 and (#questions - 1).")
@@ -384,12 +401,7 @@ function validate_master_json(master::Dict{String, Any})::Nothing
     if haskey(master, "section_numbering") && !isa(master["section_numbering"], AbstractString)
         _validation_error("root.section_numbering", "should be a string with valid typst numbering.")
     end
-    if haskey(master, "shuffle_questions") && !isa(master["shuffle_questions"], Bool)
-        _validation_error("root.shuffle_questions", "must be a boolean.")
-    end
-    if haskey(master, "shuffle_answers") && !isa(master["shuffle_answers"], Bool)
-        _validation_error("root.shuffle_answers", "must be a boolean.")
-    end
+    _validate_optional_shuffle_flags(master, "root")
     if haskey(master, "version_count") && !_is_nonnegative_integer(master["version_count"])
         _validation_error("root.version_count", "must be a nonnegative integer.")
     end
@@ -426,7 +438,13 @@ function validate_master_json(master::Dict{String, Any})::Nothing
             if !isa(section_obj, Dict)
                 _validation_error(sec_path, "section entry must be an object.")
             end
-            _require_allowed_and_required_keys(section_obj, sec_path, Set(["section_title", "questions"]), Set(["section_title", "questions"]))
+            _require_allowed_and_required_keys(
+                section_obj,
+                sec_path,
+                Set(["section_title", "questions", "shuffle_questions", "shuffle_answers"]),
+                Set(["section_title", "questions"]),
+            )
+            _validate_optional_shuffle_flags(section_obj, sec_path)
             if !isa(section_obj["section_title"], AbstractString)
                 _validation_error("$sec_path.section_title", "must be a string.")
             end
@@ -468,26 +486,33 @@ function validate_master_json_file(master_file::String)::Dict{String, Any}
     return master_dict
 end
 
+function _shuffle_config(node::Dict, parent::NamedTuple)
+    shuffle_q = haskey(node, "shuffle_questions") ? Bool(node["shuffle_questions"]) : parent.shuffle_q
+    shuffle_a = haskey(node, "shuffle_answers") ? Bool(node["shuffle_answers"]) : parent.shuffle_a
+    return (; shuffle_q, shuffle_a)
+end
+
 function process_node(node::Dict, index::Int, is_key::Bool, rng::AbstractRNG, config::NamedTuple)
+    local_config = _shuffle_config(node, config)
     if haskey(node, "questions")
         sub_questions = node["questions"]
         n = length(sub_questions)
         indices = collect(0:(n-1)) # 0-indexed for Typst
 
         if is_key
-            processed_subs = [process_node(sub_questions[i+1], i, true, rng, config) for i in indices]
+            processed_subs = [process_node(sub_questions[i+1], i, true, rng, local_config) for i in indices]
             return Dict("indx" => index, "questions" => processed_subs)
         else
             if haskey(node, "pick")
                 pick_n = node["pick"]
                 shuffle!(rng, indices)
                 indices = indices[1:pick_n]
-                if !config.shuffle_q sort!(indices) end
+                if !local_config.shuffle_q sort!(indices) end
             else
-                if config.shuffle_q shuffle!(rng, indices) end
+                if local_config.shuffle_q shuffle!(rng, indices) end
             end
             
-            processed_subs = [process_node(sub_questions[i+1], i, false, rng, config) for i in indices]
+            processed_subs = [process_node(sub_questions[i+1], i, false, rng, local_config) for i in indices]
             return Dict("indx" => index, "questions" => processed_subs)
         end
     
@@ -498,7 +523,7 @@ function process_node(node::Dict, index::Int, is_key::Bool, rng::AbstractRNG, co
             res = Dict{String, Any}()
             needs_dict = false
 
-            if config.shuffle_a && get(node, "type", "") in ["multiple_choice", "true_false"]
+            if local_config.shuffle_a && get(node, "type", "") in ["multiple_choice", "true_false"]
                 opts_len = haskey(node, "options") ? length(node["options"]) : length(get(node, "func_options", []))
                 if opts_len > 0
                     permutation = shuffle(rng, collect(Int, 0:(opts_len-1)))
@@ -538,6 +563,17 @@ function process_node(node::Dict, index::Int, is_key::Bool, rng::AbstractRNG, co
             end
         end
     end
+end
+
+# One sampled selection node for live builder preview (canonical option order, frozen vars).
+function preview_selection_for_question(question::Dict; seed::Integer=1234)
+    rng = Xoshiro(Int64(seed))
+    q = Dict{String, Any}(question)
+    delete!(q, "shuffle_questions")
+    delete!(q, "shuffle_answers")
+    config = (shuffle_q=false, shuffle_a=false)
+    result = process_node(q, 0, false, rng, config)
+    return isa(result, Dict) ? result : Dict{String, Any}("indx" => 0)
 end
 
 function generate_selection_json(; master_file::String, output_dir::String)::String

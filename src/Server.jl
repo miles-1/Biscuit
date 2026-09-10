@@ -21,6 +21,7 @@ const STATE = Dict{String, Any}(
     "assn_archive_path" => nothing,
     "temp_archive_dir" => nothing,
 )
+const PREVIEW_COMPILE_LOCK = ReentrantLock()
 
 # On exit, fold any work in the unpacked temp dir back into the .assn archive it came from, then
 # clean the temp dir up. If repacking fails for any reason, the temp dir is intentionally left in

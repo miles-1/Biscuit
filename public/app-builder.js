@@ -30,6 +30,11 @@ let builderState = {
     previewLoading: false,
     previewError: null,
     previewZoom: 1.0,
+    previewKind: 'none',
+    questionPreviewId: null,
+    questionPreviewHash: null,
+    questionPreviewError: null,
+    questionPreviewUpdating: false,
 };
 
 let builderToggles = {
@@ -39,6 +44,10 @@ let builderToggles = {
     seed: false,
     globalVars: false,
 };
+
+let builderQuestionPreviewTimer = null;
+let builderQuestionPreviewSeq = 0;
+let builderLastQuestionPath = null;
 
 function toggleTopSetting(key) {
     builderToggles[key] = !builderToggles[key];
@@ -111,6 +120,7 @@ function openMasterBuilder(initialData, initialPath) {
     }
     showSection('builder-sec');
     renderBuilderUI();
+    ensureBuilderPreviewListeners();
     renderPreviewPane();
 }
 
@@ -152,7 +162,13 @@ function resetBuilderState(path = '') {
         previewLoading: false,
         previewError: null,
         previewZoom: 1.0,
+        previewKind: 'none',
+        questionPreviewId: null,
+        questionPreviewHash: null,
+        questionPreviewError: null,
+        questionPreviewUpdating: false,
     };
+    builderLastQuestionPath = null;
 }
 
 function loadMasterDataIntoState(data, path = '') {
@@ -172,7 +188,13 @@ function loadMasterDataIntoState(data, path = '') {
     builderState.previewPages = [];
     builderState.previewLoading = false;
     builderState.previewError = null;
+    builderState.previewKind = 'none';
+    builderState.questionPreviewId = null;
+    builderState.questionPreviewHash = null;
+    builderState.questionPreviewError = null;
+    builderState.questionPreviewUpdating = false;
     builderState.activeAddMenuKey = null;
+    builderLastQuestionPath = null;
 
     builderState.master = {
         assn_type: data.assn_type || 'quiz',
@@ -188,10 +210,10 @@ function loadMasterDataIntoState(data, path = '') {
         single_doc_export: !!data.single_doc_export,
         will_print_double_sided: data.will_print_double_sided !== undefined ? !!data.will_print_double_sided : true,
         use_sections: hasSections,
-        sections: hasSections ? questionsRaw.map((sec) => ({
+        sections: hasSections ? questionsRaw.map((sec) => applyShuffleOverrides({
             section_title: String(sec.section_title || ''),
             questions: normalizeQuestionsFromData(sec.questions || []),
-        })) : [createDefaultSection('Section 1')],
+        }, sec)) : [createDefaultSection('Section 1')],
         questions: !hasSections ? normalizeQuestionsFromData(questionsRaw) : [],
     };
 }
@@ -228,10 +250,10 @@ function buildMasterJsonPayload() {
     result.will_print_double_sided = m.will_print_double_sided !== undefined ? !!m.will_print_double_sided : true;
 
     if (m.use_sections) {
-        result.questions = (m.sections || []).map((sec) => ({
+        result.questions = (m.sections || []).map((sec) => applyShuffleOverrides({
             section_title: (sec.section_title || '').trim(),
             questions: sanitizeQuestionList(sec.questions || [])
-        }));
+        }, sec));
     } else {
         result.questions = sanitizeQuestionList(m.questions || []);
     }
@@ -239,13 +261,64 @@ function buildMasterJsonPayload() {
     return result;
 }
 
+function applyShuffleOverrides(target, source) {
+    if (!target || !source || typeof source !== 'object') return target;
+    if (typeof source.shuffle_questions === 'boolean') target.shuffle_questions = source.shuffle_questions;
+    else delete target.shuffle_questions;
+    if (typeof source.shuffle_answers === 'boolean') target.shuffle_answers = source.shuffle_answers;
+    else delete target.shuffle_answers;
+    return target;
+}
+
+function shuffleSelectValue(obj, key) {
+    if (!obj || typeof obj[key] !== 'boolean') return 'inherit';
+    return obj[key] ? 'true' : 'false';
+}
+
+function renderShuffleOverrideSelect(obj, key, onchangeAttr, label) {
+    const val = shuffleSelectValue(obj, key);
+    return `
+        <label class="builder-shuffle-override">
+            <span>${label}</span>
+            <select class="builder-input-select builder-shuffle-select" onchange="${onchangeAttr}">
+                <option value="inherit" ${val === 'inherit' ? 'selected' : ''}>Inherit</option>
+                <option value="true" ${val === 'true' ? 'selected' : ''}>Yes</option>
+                <option value="false" ${val === 'false' ? 'selected' : ''}>No</option>
+            </select>
+        </label>
+    `;
+}
+
+function setShuffleOverride(obj, key, selectValue) {
+    if (!obj || typeof obj !== 'object') return;
+    if (selectValue === 'true') obj[key] = true;
+    else if (selectValue === 'false') obj[key] = false;
+    else delete obj[key];
+}
+
+function updateSectionShuffle(sIdx, key, value) {
+    const sec = builderState.master.sections && builderState.master.sections[sIdx];
+    if (sec) setShuffleOverride(sec, key, value);
+}
+
+function updateBankShuffle(sIdx, bIdx, key, value) {
+    const list = getTargetQuestionList(sIdx, null);
+    const bank = list && list[bIdx];
+    if (bank) setShuffleOverride(bank, key, value);
+}
+
+function updateQuestionShuffle(sIdx, bIdx, qIdx, key, value) {
+    const q = getQuestionRef(sIdx, bIdx, qIdx);
+    if (q) setShuffleOverride(q, key, value);
+}
+
 function sanitizeQuestionList(list) {
     return list.map((item) => {
         if (item && typeof item === 'object' && 'pick' in item) {
-            return {
+            return applyShuffleOverrides({
                 pick: Math.max(1, parseInt(item.pick, 10) || 1),
                 questions: (item.questions || []).map(sanitizeSingleQuestion),
-            };
+            }, item);
         }
         return sanitizeSingleQuestion(item);
     });
@@ -321,10 +394,10 @@ function normalizeQuestionsFromData(list) {
     return list.map((item) => {
         if (!item || typeof item !== 'object') return item;
         if ('pick' in item) {
-            return {
+            return applyShuffleOverrides({
                 pick: Math.max(1, parseInt(item.pick, 10) || 1),
                 questions: normalizeQuestionsFromData(item.questions || []),
-            };
+            }, item);
         }
         const copy = JSON.parse(JSON.stringify(item));
         if (copy.rubric) {
@@ -389,7 +462,7 @@ function sanitizeSingleQuestion(q) {
             clean.rubric = cleanRubric;
         }
     }
-    return clean;
+    return applyShuffleOverrides(clean, q);
 }
 
 function renderBuilderUI() {
@@ -402,6 +475,7 @@ function renderBuilderUI() {
 
     container.innerHTML = html;
     attachBuilderEventListeners();
+    ensureBuilderPreviewListeners();
     if (typeof enhanceTypstMarkupFields === "function") enhanceTypstMarkupFields(container);
 }
 
@@ -560,6 +634,10 @@ function renderSectionCardHtml(sec, sIdx) {
                     <button type="button" class="btn-icon btn-danger" title="Delete Section" onclick="deleteSection(${sIdx})"><span>🗑</span></button>
                 </div>
             </div>
+            <div class="builder-shuffle-row">
+                ${renderShuffleOverrideSelect(sec, 'shuffle_questions', `updateSectionShuffle(${sIdx}, 'shuffle_questions', this.value)`, 'Shuffle questions')}
+                ${renderShuffleOverrideSelect(sec, 'shuffle_answers', `updateSectionShuffle(${sIdx}, 'shuffle_answers', this.value)`, 'Shuffle answers')}
+            </div>
             <div class="builder-questions-list" style="margin-top: 10px;">
                 ${questions.map((qItem, qIdx) => renderQuestionOrBankHtml(qItem, qIdx, false, sIdx, null)).join('')}
                 ${renderAddQuestionButtonHtml(`sec-${sIdx}`, false, sIdx, null)}
@@ -594,6 +672,10 @@ function renderBankCardHtml(bank, bIdx, sIdx) {
                     <button type="button" class="btn-icon" title="Move Down" onclick="moveItem(${sIdx}, ${bIdx}, 1)"><span>▼</span></button>
                     <button type="button" class="btn-icon btn-danger" title="Delete Bank" onclick="deleteItem(${sIdx}, ${bIdx})"><span>🗑</span></button>
                 </div>
+            </div>
+            <div class="builder-shuffle-row">
+                ${renderShuffleOverrideSelect(bank, 'shuffle_questions', `updateBankShuffle(${sIdx}, ${bIdx}, 'shuffle_questions', this.value)`, 'Shuffle questions')}
+                ${renderShuffleOverrideSelect(bank, 'shuffle_answers', `updateBankShuffle(${sIdx}, ${bIdx}, 'shuffle_answers', this.value)`, 'Shuffle answers')}
             </div>
             <div class="builder-bank-subquestions">
                 ${subQuestions.map((subQ, subIdx) => renderQuestionCardHtml(subQ, subIdx, true, sIdx, bIdx)).join('')}
@@ -658,7 +740,7 @@ function renderQuestionCardHtml(q, qIdx, isInsideBank, sIdx, bIdx) {
     const badgeClass = typeBadges[q.type] || 'badge-default';
 
     return `
-        <div class="builder-question-card" data-q-index="${qIdx}">
+        <div class="builder-question-card" data-q-preview="1" data-s-idx="${sIdx === null || sIdx === undefined ? '' : sIdx}" data-b-idx="${bIdx === null || bIdx === undefined ? '' : bIdx}" data-q-idx="${qIdx}">
             <div class="builder-question-header">
                 <div class="builder-q-badge-wrap">
                     <span class="builder-q-num">Q${qIdx + 1}</span>
@@ -675,6 +757,11 @@ function renderQuestionCardHtml(q, qIdx, isInsideBank, sIdx, bIdx) {
                     <button type="button" class="btn-icon btn-danger" title="Delete Question" onclick="deleteQuestion(${sIdx}, ${bIdx}, ${qIdx})"><span>🗑</span></button>
                 </div>
             </div>
+            ${(q.type === 'multiple_choice' || q.type === 'true_false') ? `
+                <div class="builder-shuffle-row">
+                    ${renderShuffleOverrideSelect(q, 'shuffle_answers', `updateQuestionShuffle(${sIdx}, ${bIdx}, ${qIdx}, 'shuffle_answers', this.value)`, 'Shuffle answers')}
+                </div>
+            ` : ''}
 
             <div class="builder-field-block" style="margin-top: 10px;">
                 <label>Question Body <em>(Typst markup)</em></label>
@@ -1258,9 +1345,179 @@ function deleteItem(sIdx, idx) {
 
 // --- Preview & Save Functions ---
 
+function parseIdxAttr(v) {
+    if (v === undefined || v === null || v === '') return null;
+    const n = Number(v);
+    return Number.isInteger(n) ? n : null;
+}
+
+function questionPathFromEvent(e) {
+    const node = e.target && e.target.closest && e.target.closest('[data-q-preview]');
+    if (!node) return null;
+    const qIdx = parseIdxAttr(node.getAttribute('data-q-idx'));
+    if (qIdx === null) return null;
+    return {
+        sIdx: parseIdxAttr(node.getAttribute('data-s-idx')),
+        bIdx: parseIdxAttr(node.getAttribute('data-b-idx')),
+        qIdx,
+    };
+}
+
+function shouldRefreshQuestionPreview(e) {
+    if (!e || !e.target) return false;
+    if (e.target.classList && e.target.classList.contains('builder-shuffle-select')) return false;
+    if (e.target.closest && e.target.closest('[data-q-preview]')) return true;
+    const id = e.target.id;
+    return id === 'builder-global-vars' || id === 'builder-margin' || id === 'builder-seed';
+}
+
+function ensureBuilderPreviewListeners() {
+    const form = document.getElementById('builder-form-container');
+    if (!form || form.dataset.qPreviewBound === '1') return;
+    form.dataset.qPreviewBound = '1';
+    form.addEventListener('focusin', onBuilderPreviewFocus);
+    form.addEventListener('input', onBuilderPreviewInput);
+    form.addEventListener('change', onBuilderPreviewInput);
+}
+
+function onBuilderPreviewFocus(e) {
+    const path = questionPathFromEvent(e);
+    if (!path) return;
+    builderLastQuestionPath = path;
+    scheduleQuestionPreview();
+}
+
+function onBuilderPreviewInput(e) {
+    if (!shouldRefreshQuestionPreview(e)) return;
+    const path = questionPathFromEvent(e);
+    if (path) builderLastQuestionPath = path;
+    scheduleQuestionPreview();
+}
+
+function scheduleQuestionPreview() {
+    if (builderQuestionPreviewTimer) clearTimeout(builderQuestionPreviewTimer);
+    builderQuestionPreviewTimer = setTimeout(() => {
+        builderQuestionPreviewTimer = null;
+        requestQuestionPreview();
+    }, 300);
+}
+
+async function requestQuestionPreview() {
+    const path = builderLastQuestionPath;
+    if (!path) return;
+    const q = getQuestionRef(path.sIdx, path.bIdx, path.qIdx);
+    if (!q || typeof q !== 'object' || 'pick' in q) return;
+
+    const seq = ++builderQuestionPreviewSeq;
+    builderState.questionPreviewUpdating = true;
+    builderState.previewKind = 'question';
+    renderPreviewPane();
+
+    const m = builderState.master;
+    try {
+        const res = await fetch('/api/preview_question', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                question: sanitizeSingleQuestion(q),
+                global_vars: m.global_vars || '',
+                margin: typeof m.margin === 'number' ? m.margin : 1.5,
+                seed: typeof m.seed === 'number' && m.seed > 0 ? m.seed : 1234,
+                is_key: true,
+            }),
+        });
+        const data = await res.json();
+        if (seq !== builderQuestionPreviewSeq) return;
+        if (!res.ok || data.status !== 'success') {
+            builderState.questionPreviewError = data.message || 'Question preview failed.';
+        } else {
+            builderState.questionPreviewId = data.preview_id;
+            builderState.questionPreviewHash = data.hash;
+            builderState.questionPreviewError = null;
+            if (data.preview_id) builderState.previewId = data.preview_id;
+        }
+    } catch (e) {
+        if (seq !== builderQuestionPreviewSeq) return;
+        builderState.questionPreviewError = 'Failed to connect to server: ' + (e.message || String(e));
+    } finally {
+        if (seq === builderQuestionPreviewSeq) {
+            builderState.questionPreviewUpdating = false;
+            renderPreviewPane();
+        }
+    }
+}
+
+function questionPreviewSrc() {
+    if (!builderState.questionPreviewId || !builderState.questionPreviewHash) return '';
+    return `/api/preview_question/${builderState.questionPreviewId}?h=${encodeURIComponent(builderState.questionPreviewHash)}`;
+}
+
+function renderQuestionPreviewInto(container, header) {
+    const src = questionPreviewSrc();
+    const updating = builderState.questionPreviewUpdating;
+    const qErr = builderState.questionPreviewError;
+    if (header) {
+        header.textContent = updating ? 'Question preview · updating…' : 'Question preview · Key';
+    }
+
+    let card = container.querySelector('.builder-preview-question-card');
+    let img = container.querySelector('img.builder-preview-svg');
+    let errBox = container.querySelector('.builder-preview-error-inline');
+
+    if (!src && updating) {
+        container.innerHTML = `
+            <div class="builder-preview-placeholder">
+                <div class="btn-spinner" style="width: 24px; height: 24px; margin-bottom: 12px;"></div>
+                <div>Rendering question…</div>
+            </div>
+        `;
+        return;
+    }
+
+    if (!src && qErr) {
+        container.innerHTML = `
+            <div class="builder-preview-error">
+                <h4>Question Preview Error</h4>
+                <pre class="builder-error-pre">${escapeHtml(qErr)}</pre>
+            </div>
+        `;
+        return;
+    }
+
+    if (!src) return false;
+
+    if (!card || !img) {
+        container.innerHTML = `
+            ${qErr ? `<div class="builder-preview-error builder-preview-error-inline"><h4>Question Preview Error</h4><pre class="builder-error-pre">${escapeHtml(qErr)}</pre></div>` : ''}
+            <div class="builder-preview-question-card${updating ? ' is-updating' : ''}">
+                <img class="builder-preview-svg" data-hash="${escapeHtml(builderState.questionPreviewHash)}" src="${src}" alt="Question preview">
+            </div>
+        `;
+        return true;
+    }
+
+    card.classList.toggle('is-updating', !!updating);
+    if (img.getAttribute('data-hash') !== builderState.questionPreviewHash) {
+        img.src = src;
+        img.setAttribute('data-hash', builderState.questionPreviewHash);
+    }
+    if (qErr) {
+        if (!errBox) {
+            errBox = document.createElement('div');
+            errBox.className = 'builder-preview-error builder-preview-error-inline';
+            container.insertBefore(errBox, card);
+        }
+        errBox.innerHTML = `<h4>Question Preview Error</h4><pre class="builder-error-pre">${escapeHtml(qErr)}</pre>`;
+    } else if (errBox) {
+        errBox.remove();
+    }
+    return true;
+}
+
 async function triggerPreview() {
     builderState.previewLoading = true;
     builderState.previewError = null;
+    builderState.previewKind = 'full';
     renderPreviewPane();
 
     const masterPayload = buildMasterJsonPayload();
@@ -1274,7 +1531,6 @@ async function triggerPreview() {
         const data = await res.json();
         if (!res.ok || data.status !== 'success') {
             builderState.previewError = data.message || 'Preview generation failed.';
-            builderState.previewId = null;
             builderState.previewPages = [];
         } else {
             builderState.previewId = data.preview_id;
@@ -1283,7 +1539,6 @@ async function triggerPreview() {
         }
     } catch (e) {
         builderState.previewError = 'Failed to connect to server: ' + (e.message || String(e));
-        builderState.previewId = null;
         builderState.previewPages = [];
     } finally {
         builderState.previewLoading = false;
@@ -1296,7 +1551,10 @@ function renderPreviewPane() {
     const header = document.getElementById('builder-preview-header-info');
     if (!container) return;
 
-    if (builderState.previewLoading) {
+    const showFull = builderState.previewKind === 'full';
+    const hasQuestion = !!(builderState.questionPreviewId && builderState.questionPreviewHash);
+
+    if (showFull && builderState.previewLoading) {
         container.innerHTML = `
             <div class="builder-preview-placeholder">
                 <div class="btn-spinner" style="width: 24px; height: 24px; margin-bottom: 12px;"></div>
@@ -1307,7 +1565,7 @@ function renderPreviewPane() {
         return;
     }
 
-    if (builderState.previewError) {
+    if (showFull && builderState.previewError) {
         container.innerHTML = `
             <div class="builder-preview-error">
                 <h4>Preview Error</h4>
@@ -1318,35 +1576,38 @@ function renderPreviewPane() {
         return;
     }
 
-    if (!builderState.previewId || !builderState.previewPages || builderState.previewPages.length === 0) {
+    if (showFull && builderState.previewId && builderState.previewPages && builderState.previewPages.length > 0) {
+        if (header) {
+            header.textContent = `${builderState.previewPages.length} page${builderState.previewPages.length !== 1 ? 's' : ''}`;
+        }
+        const zoom = builderState.previewZoom || 1.0;
         container.innerHTML = `
-            <div class="builder-preview-placeholder">
-                <div style="font-size: 2.5rem; margin-bottom: 10px; opacity: 0.6;">📄</div>
-                <div><strong>No preview generated yet.</strong></div>
-                <div style="font-size: 0.9rem; margin-top: 6px; color: var(--text-muted);">
-                    Click the <strong>"Preview"</strong> button above to render the assignment.
-                </div>
+            <div class="builder-preview-pages" style="zoom: ${zoom};">
+                ${builderState.previewPages.map((pageNum) => `
+                    <div class="builder-preview-page-card">
+                        <div class="builder-preview-page-label">Page ${pageNum}</div>
+                        <img class="builder-preview-img" src="/api/preview_page/${builderState.previewId}/${pageNum}?v=${Date.now()}" alt="Page ${pageNum}">
+                    </div>
+                `).join('')}
             </div>
         `;
-        if (header) header.textContent = 'No preview';
         return;
     }
 
-    if (header) {
-        header.textContent = `${builderState.previewPages.length} page${builderState.previewPages.length !== 1 ? 's' : ''}`;
+    if (hasQuestion || builderState.questionPreviewUpdating || builderState.questionPreviewError) {
+        if (renderQuestionPreviewInto(container, header) !== false) return;
     }
 
-    const zoom = builderState.previewZoom || 1.0;
     container.innerHTML = `
-        <div class="builder-preview-pages" style="zoom: ${zoom};">
-            ${builderState.previewPages.map((pageNum) => `
-                <div class="builder-preview-page-card">
-                    <div class="builder-preview-page-label">Page ${pageNum}</div>
-                    <img class="builder-preview-img" src="/api/preview_page/${builderState.previewId}/${pageNum}?v=${Date.now()}" alt="Page ${pageNum}">
-                </div>
-            `).join('')}
+        <div class="builder-preview-placeholder">
+            <div style="font-size: 2.5rem; margin-bottom: 10px; opacity: 0.6;">📄</div>
+            <div><strong>No preview yet.</strong></div>
+            <div style="font-size: 0.9rem; margin-top: 6px; color: var(--text-muted);">
+                Click a question field to live-render it, or use <strong>Preview</strong> for the full assignment.
+            </div>
         </div>
     `;
+    if (header) header.textContent = 'No preview';
 }
 
 function openSaveMasterModal() {

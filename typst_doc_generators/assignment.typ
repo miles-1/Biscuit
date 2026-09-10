@@ -1,6 +1,3 @@
-#import "@preview/tiaoma:0.3.0": data-matrix
-
-
 // misc
 #let BUBBLE = [#circle(radius:4pt)<bubble>]
 #let BUBBLE_FILLED = circle(radius:4pt, fill:black)
@@ -66,6 +63,7 @@
   return bytes(b)
 }
 #let assn_page_data_matrix(data, scale:1.5) = {
+  import "@preview/tiaoma:0.3.0": data-matrix
   let raw_bytes = pack_assn_data(data)
   let payload = to_base64(raw_bytes)
   return data-matrix(payload, options:(scale:scale))
@@ -386,15 +384,15 @@
   } 
 }
 
-#let master_file_name = sys.inputs.at("master", default:none)
-#let selection_file_name = sys.inputs.at("selection", default:none)
-#let single_doc_export = sys.inputs.at("single_doc_export", default:"false") == "true"
-#let will_print_double_sided = sys.inputs.at("will_print_double_sided", default:"true") == "true"
-#assert(master_file_name != none and selection_file_name != none, message:"missing `master` or `selection` argument")
-
-#let master = json(master_file_name)
-#let selection = json(selection_file_name)
-
-#assn_versions(master, selection, single_doc_export, will_print_double_sided)
+#{
+  let master_file_name = sys.inputs.at("master", default: none)
+  let selection_file_name = sys.inputs.at("selection", default: none)
+  if master_file_name != none or selection_file_name != none {
+    assert(master_file_name != none and selection_file_name != none, message: "missing `master` or `selection` argument")
+    let single_doc_export = sys.inputs.at("single_doc_export", default: "false") == "true"
+    let will_print_double_sided = sys.inputs.at("will_print_double_sided", default: "true") == "true"
+    assn_versions(json(master_file_name), json(selection_file_name), single_doc_export, will_print_double_sided)
+  }
+}
 
 

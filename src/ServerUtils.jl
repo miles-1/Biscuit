@@ -863,3 +863,52 @@ function patch_detailed_csv_drive_links_after_upload(summary)::Nothing
     update_detailed_csv_drive_links(path, urls)
     return nothing
 end
+
+function _workspace_dir_for_preview()::String
+    try
+        resolve_under_workspace(".")
+    catch
+        pwd()
+    end
+end
+
+function _ensure_builder_preview_dir!()::Tuple{String,String}
+    preview_dir = get(STATE, "preview_dir", nothing)
+    preview_id = get(STATE, "preview_id", nothing)
+    if !(isa(preview_dir, AbstractString) && isdir(preview_dir))
+        preview_dir = mktempdir(_workspace_dir_for_preview())
+        STATE["preview_dir"] = preview_dir
+        preview_id = string(rand(UInt64), base=16)
+        STATE["preview_id"] = preview_id
+        STATE["question_preview_hash"] = nothing
+    elseif !isa(preview_id, AbstractString) || isempty(String(preview_id))
+        preview_id = string(rand(UInt64), base=16)
+        STATE["preview_id"] = preview_id
+    end
+    return (String(preview_dir), String(preview_id))
+end
+
+function _copy_question_preview_sources!(preview_dir::String)::Nothing
+    src_dir = joinpath(package_root(), "typst_doc_generators")
+    for name in ("assignment.typ", "question_preview.typ")
+        src = joinpath(src_dir, name)
+        isfile(src) || error("Missing Typst source: $src")
+        cp(src, joinpath(preview_dir, name); force=true)
+    end
+    return nothing
+end
+
+function _json_cache_key(obj)::String
+    buf = IOBuffer()
+    JSON.print(buf, obj)
+    return string(hash(String(take!(buf))), base=16)
+end
+
+function _clear_full_preview_pages!(preview_dir::String)::Nothing
+    for file_name in readdir(preview_dir)
+        if startswith(file_name, "page-") && endswith(file_name, ".png")
+            rm(joinpath(preview_dir, file_name); force=true)
+        end
+    end
+    return nothing
+end

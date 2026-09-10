@@ -42,6 +42,28 @@ function load_binary_pages(tiff_path::String)
     end
 end
 
+# Printed payload is 3 bytes: (assn_id ÷ 256, assn_id % 256, page), then base64.
+# A false-positive libdmtx read can yield a shorter string; treat that as no matrix.
+function parse_assn_page_payload(decoded::AbstractString)::NamedTuple
+    local b
+    try
+        b = base64decode(decoded)
+    catch
+        return NamedTuple()
+    end
+    length(b) < 3 && return NamedTuple()
+    assn_id = Int64(b[1]) * 256 + Int64(b[2])
+    page = Int64(b[end])
+    (assn_id >= 0 && page >= 1) || return NamedTuple()
+    return (; assn_id, page)
+end
+
+function try_decode_assn_page_matrix(image)::NamedTuple
+    decoded = decode_matrix(image)
+    isempty(decoded) && return NamedTuple()
+    return parse_assn_page_payload(decoded)
+end
+
 function find_data_matrix(image_3d::AbstractArray{UInt8, 3}; kernel_size::NTuple{2,Int64}=(3,3))::NamedTuple
     w, h = size(image_3d, 2), size(image_3d, 3)
     # ~15% of the shorter side (250px was used for 1704×2200 scans).
@@ -50,20 +72,18 @@ function find_data_matrix(image_3d::AbstractArray{UInt8, 3}; kernel_size::NTuple
     # The datamatrix is in the bottom-left corner: x in 1:box_size, y in h-box_size+1:h
     # So indices are [:, 1:box_size, h-box_size+1:h]
     corner = image_3d[:, 1:box_size, h-box_size+1:h]
-    decoded = decode_matrix(corner)
-    if isempty(decoded)
+    parsed = try_decode_assn_page_matrix(corner)
+    if isempty(parsed)
         println("    Attempting morph open for data matrix...")
         kernel = cv.getStructuringElement(cv.MORPH_RECT, cv.Size(Int32.(kernel_size)...))
         corner_patched_3d = cv.morphologyEx(corner, cv.MORPH_OPEN, kernel)
-        decoded = decode_matrix(corner_patched_3d)
+        parsed = try_decode_assn_page_matrix(corner_patched_3d)
     end
-    if !isempty(decoded)
-        b = base64decode(decoded)
-        assn_id, page = Int64(b[1]) * 256 + Int64(b[2]), Int64(b[end])
-        return (; assn_id, page)
+    if isempty(parsed)
+        println("    No data matrix found on this page.")
+        return NamedTuple()
     end
-    println("    No data matrix found on this page.")
-    return NamedTuple()
+    return parsed
 end
 
 function find_anchor_squares(image_3d::AbstractArray{UInt8, 3})::Vector{NTuple{2, Float64}}
