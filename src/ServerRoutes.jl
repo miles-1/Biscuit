@@ -55,15 +55,32 @@ end
     for msg in ws
         data = JSON.parse(String(msg))
         tiff_file = data["tiff_file"]
-        assn_versions_file = data["assn_file"]
+        non_biscuit = get(data, "non_biscuit", false) === true
+        assn_versions_file = String(get(data, "assn_file", ""))
         corrections = get(data, "corrections", Dict{String, Any}())
         
         if !isfile(tiff_file)
             throw(ArgumentError("`tiff_file` was provided but could not be found: $tiff_file"))
-        elseif !isfile(assn_versions_file)
+        elseif !non_biscuit && !isfile(assn_versions_file)
             throw(ArgumentError("`assn_versions_file` was provided but could not be found: $assn_versions_file"))
         end
-        
+
+        class_csv_file = nothing
+        if non_biscuit
+            class_name = get(data, "class_name", nothing)
+            if isa(class_name, AbstractString) && !isempty(strip(class_name))
+                class_csv_file = class_csv_path(class_name)
+                if !isfile(class_csv_file)
+                    try
+                        HTTP.WebSockets.send(ws, "Error: Class CSV not found for $(repr(class_name))\n")
+                        HTTP.WebSockets.send(ws, "Done\n")
+                    catch
+                    end
+                    continue
+                end
+            end
+        end
+
         original_stdout = stdout
         rd, wr = redirect_stdout()
         reader_task = @async begin
@@ -78,13 +95,24 @@ end
         end
         
         try
-            process_scans(
-                tiff_file;
-                assn_versions_file=assn_versions_file,
-                corrections=corrections,
-                namereader_file=_optional_path(get(data, "namereader_file", nothing)),
-                output_name=_optional_path(get(data, "new_file_name", nothing)),
-            )
+            if non_biscuit
+                process_non_biscuit_scans(
+                    tiff_file;
+                    pages_per_student=_required_positive_int(get(data, "pages_per_student", nothing), "Num Pages Per Student"),
+                    total_points=_required_nonnegative_number(get(data, "total_points", nothing), "Total Points"),
+                    assn_type=String(get(data, "assn_type", "")),
+                    output_name=_optional_path(get(data, "new_file_name", nothing)),
+                    class_csv_file=class_csv_file,
+                )
+            else
+                process_scans(
+                    tiff_file;
+                    assn_versions_file=assn_versions_file,
+                    corrections=corrections,
+                    namereader_file=_optional_path(get(data, "namereader_file", nothing)),
+                    output_name=_optional_path(get(data, "new_file_name", nothing)),
+                )
+            end
             tmp_dir = STATE["temp_archive_dir"]
             if isa(tmp_dir, AbstractString) && !isdir(tmp_dir)
                 STATE["temp_archive_dir"] = nothing

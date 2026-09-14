@@ -15,6 +15,18 @@ function _optional_path(value)::Union{Nothing,String}
     return isempty(stripped) ? nothing : stripped
 end
 
+function _required_positive_int(value, label::AbstractString)::Int
+    isa(value, Real) && isfinite(value) && isinteger(value) && value >= 1 ||
+        throw(ArgumentError("`$label` must be a whole number of at least 1, got $(repr(value))"))
+    return Int(value)
+end
+
+function _required_nonnegative_number(value, label::AbstractString)::Float64
+    isa(value, Real) && isfinite(value) && value >= 0 ||
+        throw(ArgumentError("`$label` must be a number of at least 0, got $(repr(value))"))
+    return Float64(value)
+end
+
 """
 User-facing message for Google Drive API failures. Network blips become a short retry hint
 instead of a raw HTTP.Exceptions.ConnectError stack dump.

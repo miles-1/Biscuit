@@ -114,30 +114,38 @@ async function refreshClassesUi() {
     }
 }
 
+const CLASS_SELECT_IDS = ['gen-class-select', 'proc-class-select'];
+
+function classSelectElements() {
+    return CLASS_SELECT_IDS.map((id) => document.getElementById(id)).filter(Boolean);
+}
+
 async function refreshClassSelect() {
-    const select = document.getElementById('gen-class-select');
-    if (!select) return;
-    const prev = select.value;
+    const selects = classSelectElements();
+    if (!selects.length) return;
     try {
         if (!classesCache.length) await fetchClasses();
     } catch (e) {
         // Keep whatever options exist if list fails mid-session.
     }
-    select.innerHTML = '';
-    const none = document.createElement('option');
-    none.value = '';
-    none.textContent = '(none)';
-    select.appendChild(none);
-    for (const cls of classesCache) {
-        const opt = document.createElement('option');
-        opt.value = cls.class_name || '';
-        opt.textContent = cls.class_name || '';
-        select.appendChild(opt);
-    }
-    if ([...select.options].some((o) => o.value === prev)) {
-        select.value = prev;
-    } else {
-        select.value = '';
+    for (const select of selects) {
+        const prev = select.value;
+        select.innerHTML = '';
+        const none = document.createElement('option');
+        none.value = '';
+        none.textContent = '(none)';
+        select.appendChild(none);
+        for (const cls of classesCache) {
+            const opt = document.createElement('option');
+            opt.value = cls.class_name || '';
+            opt.textContent = cls.class_name || '';
+            select.appendChild(opt);
+        }
+        if ([...select.options].some((o) => o.value === prev)) {
+            select.value = prev;
+        } else {
+            select.value = '';
+        }
     }
 }
 
@@ -232,11 +240,9 @@ async function addNewClass() {
         if (nameInput) nameInput.value = '';
         clearPendingNewClassCsv();
         await refreshClassesUi();
-        const select = document.getElementById('gen-class-select');
-        if (select && data.class?.class_name) {
-            select.value = data.class.class_name;
-        } else if (select) {
-            select.value = className;
+        const added = data.class?.class_name || className;
+        for (const select of classSelectElements()) {
+            select.value = added;
         }
         setClassesStatus(`Added class “${className}”.`);
     } catch (e) {

@@ -339,7 +339,7 @@ button:disabled { opacity: 0.55; cursor: default; }
     gap: 8px;
     margin: 8px 0 16px;
 }
-#gen-class-select {
+#gen-class-select, #proc-class-select {
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
     font-size: inherit;
     box-sizing: border-box;
@@ -355,6 +355,65 @@ button:disabled { opacity: 0.55; cursor: default; }
     height: 27px;
     box-sizing: border-box;
     padding: 0 15px;
+}
+/* The two mutually exclusive scan sources sit side by side, stretched to a common height. */
+.proc-source-row {
+    display: flex;
+    align-items: stretch;
+    gap: 14px;
+    margin: 8px 0;
+}
+.proc-source-group {
+    flex: 1 1 0;
+    min-width: 0;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 12px;
+}
+.proc-source-or {
+    display: flex;
+    align-items: center;
+    font-weight: bold;
+    letter-spacing: 0.05em;
+    white-space: nowrap;
+}
+.proc-input-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 6px;
+}
+.proc-input-row input[type="text"] {
+    flex: 1 1 auto;
+    min-width: 0;
+    margin: 0;
+}
+.proc-input-row button {
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+.proc-source-group.is-disabled,
+#proc-namereader-row.is-disabled {
+    opacity: 0.45;
+    filter: grayscale(1);
+    color: var(--text-muted);
+    pointer-events: none;
+}
+.proc-source-group.is-disabled {
+    background: var(--bg-muted);
+}
+.proc-checkbox-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: bold;
+    cursor: pointer;
+}
+.proc-checkbox-label input {
+    margin: 0;
+}
+#proc-non-biscuit-fields {
+    margin-top: 10px;
 }
 .btn-spinner {
     width: 12px;

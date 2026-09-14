@@ -8,7 +8,7 @@ using ..Dmtx: decode_matrix
 using ..NameReader: load_name_reader, guess_assignment_names
 using ..Classes: read_roster_table
 
-export process_scans, export_name_training_data, extract_name_field_crops
+export process_scans, process_non_biscuit_scans, export_name_training_data, extract_name_field_crops
 
 const Points2F64 = Vector{NTuple{2,Float64}}
 const pdf_width = 612
@@ -957,6 +957,193 @@ function process_scans(
             println("Removed stale extract: $stale_tmp")
         end
     end
+end
+
+### Non-Biscuit scans ###
+
+# The dummy assignment is one unanswered essay at the top of page 1, so grading has a single
+# whole-submission score to fill in. `points` stays integral when the caller gave a whole number.
+function _non_biscuit_master(;
+    assn_type::AbstractString,
+    title::AbstractString,
+    total_points::Real,
+    num_students::Int,
+)::Dict{String, Any}
+    points = isinteger(total_points) ? Int64(total_points) : Float64(total_points)
+    return Dict{String, Any}(
+        "assn_type" => String(assn_type),
+        "title" => String(title),
+        "version_count" => num_students,
+        "questions" => Any[Dict{String, Any}(
+            "type" => "essay",
+            "body" => "",
+            "points" => points,
+        )],
+    )
+end
+
+function _non_biscuit_selection(num_students::Int)::Dict{String, Any}
+    versions = Any[Dict{String, Any}("is_key" => true, "questions" => Any[0])]
+    for assn_id in 0:(num_students - 1)
+        push!(versions, Dict{String, Any}("assn_id" => assn_id, "questions" => Any[0]))
+    end
+    return Dict{String, Any}("versions" => versions)
+end
+
+# Grading pads its question list from `q_heights`, so page 1 declares the one question and the
+# remaining pages declare none. Anchors and bubbles stay empty: nothing is detected on these scans.
+function _non_biscuit_page_elements(num_students::Int, pages_per_student::Int)::Dict{String, Any}
+    page_elements = Dict{String, Any}()
+    for assn_id in 0:(num_students - 1)
+        pages = Dict{String, Any}()
+        for page in 1:pages_per_student
+            pages[string(page)] = Dict{String, Any}(
+                "q_heights" => page == 1 ? Any[Any[0.0, 0.0]] : Any[],
+                "bubbles" => Any[],
+                "anchors" => Any[],
+            )
+        end
+        page_elements[string(assn_id)] = pages
+    end
+    return page_elements
+end
+
+function _non_biscuit_processed_assn_data(num_students::Int)::Dict{String, Any}
+    processed = Dict{String, Any}()
+    for assn_id in 0:(num_students - 1)
+        processed[string(assn_id)] = Dict{String, Any}(
+            "questions" => Any[Dict{String, Any}("page" => 1, "q_height" => 0)],
+        )
+    end
+    return processed
+end
+
+function _write_non_biscuit_annotated(pages, output_dir::String; pages_per_student::Int)::Nothing
+    if isdir(output_dir)
+        rm(output_dir; recursive=true)
+    end
+    mkpath(output_dir)
+    scan_results = Dict{String, Any}[]
+    printstyled("Annotating Pages\n"; bold=true, underline=true)
+    for (ppage_indx, frame_cv) in enumerate(pages)
+        w, h = Int64(size(frame_cv, 2)), Int64(size(frame_cv, 3))
+        assn_id = (ppage_indx - 1) ÷ pages_per_student
+        page = (ppage_indx - 1) % pages_per_student + 1
+        page == 1 && println("- Assn $assn_id...")
+        place_text("Assn ID $assn_id, Page $page", frame_cv; w, h, text_color=(155, 12, 30), pad_right_corner=true)
+        dir_name = "assn_$assn_id"
+        mkpath(joinpath(output_dir, dir_name))
+        file_name = string(lpad(page, 4, '0'), ".png")
+        cv.imwrite(joinpath(output_dir, dir_name, file_name), frame_cv)
+        push!(scan_results, Dict{String, Any}(
+            "ppage_indx" => ppage_indx,
+            "width" => w,
+            "height" => h,
+            "identified" => true,
+            "assn_id" => assn_id,
+            "page" => page,
+            "anchors_ok" => true,
+            "tiff_anchors" => Any[],
+            "image_path" => joinpath(dir_name, file_name),
+        ))
+    end
+    open(joinpath(output_dir, "scan_results.json"), "w") do f
+        JSON.print(f, scan_results)
+    end
+    return nothing
+end
+
+"""
+    process_non_biscuit_scans(tiff_path; pages_per_student, total_points, assn_type, kwargs...)
+
+Build a gradeable `.assn` archive from scans Biscuit did not generate.
+
+These pages carry no data matrix and no anchors, so page identity comes from position alone:
+TIFF page `i` (1-based) belongs to assignment `(i - 1) ÷ pages_per_student` at its page
+`(i - 1) % pages_per_student + 1`. The page count must divide evenly.
+
+The archive describes a one-question dummy assignment worth `total_points`, so the grading
+UI has a single score per submission to fill in. Returns the `.assn` path.
+"""
+function process_non_biscuit_scans(
+    tiff_path::String;
+    pages_per_student::Integer,
+    total_points::Real,
+    assn_type::AbstractString,
+    output_name::Union{Nothing, AbstractString}=nothing,
+    class_csv_file::Union{Nothing, AbstractString}=nothing,
+)::String
+    pages_per_student >= 1 ||
+        throw(ArgumentError("`Num Pages Per Student` must be at least 1, got $pages_per_student"))
+    (isfinite(total_points) && total_points >= 0) ||
+        throw(ArgumentError("`Total Points` must be a nonnegative number, got $total_points"))
+    assn_type in ("quiz", "worksheet", "exam") ||
+        throw(ArgumentError("`assn_type` must be \"quiz\", \"worksheet\", or \"exam\", got $(repr(assn_type))"))
+    if class_csv_file !== nothing && !isfile(class_csv_file)
+        throw(ArgumentError("Class roster CSV not found: $class_csv_file"))
+    end
+
+    per_student = Int(pages_per_student)
+    ret, pages = cv.imreadmulti(tiff_path; flags=cv.IMREAD_COLOR)
+    ret || error("Could not load TIFF file at $tiff_path")
+    num_pages = length(pages)
+    num_pages > 0 || error("No pages found in TIFF file at $tiff_path")
+    num_pages % per_student == 0 || error(
+        "TIFF has $num_pages page(s), which is not a multiple of the $per_student " *
+        "page(s) per student. Fix the scan or the page count, then try again."
+    )
+    num_students = num_pages ÷ per_student
+
+    out_dir = dirname(abspath(tiff_path))
+    stem = if output_name !== nothing && !isempty(strip(String(output_name)))
+        String(strip(String(output_name)))
+    else
+        first(splitext(basename(tiff_path)))
+    end
+    assn_archive_file = joinpath(out_dir, stem * ".assn")
+
+    printstyled("Processing Non-Biscuit Scans\n"; bold=true, underline=true)
+    println("- $num_pages page(s) at $pages_per_student per student → $num_students submission(s)")
+    println("- Dummy $assn_type question worth $total_points point(s)")
+
+    mktempdir() do build_dir
+        write_json(name, data) = open(joinpath(build_dir, name), "w") do f
+            JSON.print(f, data)
+        end
+        write_json("master.json", _non_biscuit_master(;
+            assn_type,
+            title=stem,
+            total_points,
+            num_students,
+        ))
+        println("Added: master.json")
+        write_json("selection.json", _non_biscuit_selection(num_students))
+        println("Created: selection.json - $num_students student version(s) and 1 key")
+        write_json("page_elements.json", _non_biscuit_page_elements(num_students, per_student))
+        println("Created: page_elements.json")
+        write_json("var_answers.json", Dict{String, Any}())
+        println("Created: var_answers.json")
+        write_json("processed_assn_data.json", _non_biscuit_processed_assn_data(num_students))
+        println("Created: processed_assn_data.json")
+
+        annotated_dir = joinpath(build_dir, "annotated")
+        _write_non_biscuit_annotated(pages, annotated_dir; pages_per_student=per_student)
+        write_assn_page_counts(annotated_dir)
+
+        if class_csv_file !== nothing
+            cp(class_csv_file, joinpath(build_dir, basename(class_csv_file)); force=true)
+            println("Added: $(basename(class_csv_file))")
+        end
+
+        make_archive_from_dir(build_dir, assn_archive_file; rebuild=false)
+    end
+    println("Created: $assn_archive_file")
+    stale_tmp = abspath(assn_archive_file) * ".tmp"
+    if isdir(stale_tmp)
+        rm(stale_tmp; recursive=true, force=true)
+        println("Removed stale extract: $stale_tmp")
+    end
+    return assn_archive_file
 end
 
 function _processed_assn_entry(processed_assn_data, assn_id)

@@ -141,17 +141,50 @@
     <div id="process-sec" class="section hidden">
         <h2>Process Scans</h2>
         <label>TIFF File Path:</label><br>
-        <input type="text" id="proc-tiff-path" oninput="bustScanImageCache()">
+        <input type="text" id="proc-tiff-path" oninput="syncProcessNameFromTiff(); bustScanImageCache()">
         <button onclick="pickFile('proc-tiff-path', ['.tif', '.tiff'])">Browse</button><br>
-        <label>Assignment Versions File Path (.assnversions):</label><br>
-        <input type="text" id="proc-assnversions-path" oninput="syncProcessNameFromPath(); bustScanImageCache()">
-        <button onclick="pickFile('proc-assnversions-path', ['.assnversions'])">Browse</button><br>
+        <div class="proc-source-row">
+            <div id="proc-biscuit-group" class="proc-source-group">
+                <label for="proc-assnversions-path">Assignment Versions File Path (.assnversions):</label>
+                <div class="proc-input-row">
+                    <input type="text" id="proc-assnversions-path" oninput="syncProcessNameFromPath(); bustScanImageCache()">
+                    <button type="button" onclick="pickFile('proc-assnversions-path', ['.assnversions'])">Browse</button>
+                </div>
+            </div>
+            <div class="proc-source-or">- OR -</div>
+            <div id="proc-non-biscuit-group" class="proc-source-group">
+                <label class="proc-checkbox-label" for="proc-non-biscuit">
+                    <input type="checkbox" id="proc-non-biscuit" onchange="updateProcessModeUi()">
+                    Process Non-Biscuit Scans
+                </label>
+                <div id="proc-non-biscuit-fields" class="hidden">
+                    <label for="proc-pages-per-student">Num Pages Per Student:</label><br>
+                    <input type="number" id="proc-pages-per-student" class="builder-input-sm" min="1" step="1" value="1"><br>
+                    <label for="proc-assn-type">Assignment Type:</label><br>
+                    <select id="proc-assn-type">
+                        <option value="exam">exam</option>
+                        <option value="quiz">quiz</option>
+                        <option value="worksheet">worksheet</option>
+                    </select><br>
+                    <label for="proc-total-points">Total Points:</label><br>
+                    <input type="number" id="proc-total-points" class="builder-input-sm" min="0" step="any" value="100"><br>
+                    <label for="proc-class-select">Select Class <em>(optional)</em>:</label><br>
+                    <div class="class-select-row">
+                        <select id="proc-class-select"></select>
+                        <button type="button" onclick="openClassesModal()">Add New</button>
+                    </div>
+                </div>
+            </div>
+        </div>
         <label>New File Name (without extension):</label><br>
         <input type="text" id="proc-new-name" oninput="updateProcessNameStatus()">
         <div id="proc-name-warning" style="font-size: 12px; margin-top: 4px;"></div><br>
-        <label>Name Reader File <em>(optional, .namereader)</em>:</label><br>
-        <input type="text" id="proc-namereader-path">
-        <button type="button" onclick="pickFile('proc-namereader-path', ['.namereader'])">Browse</button><br><br>
+        <div id="proc-namereader-row">
+            <label>Name Reader File <em>(optional, .namereader)</em>:</label><br>
+            <input type="text" id="proc-namereader-path">
+            <button type="button" onclick="pickFile('proc-namereader-path', ['.namereader'])">Browse</button>
+        </div>
+        <br>
         <button onclick="processScans()">Run</button>
         <button onclick="goHome()">Back</button>
         <h3>Output:</h3>

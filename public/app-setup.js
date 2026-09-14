@@ -248,8 +248,11 @@ function showSection(id) {
     if (id) {
         document.getElementById(id).classList.remove('hidden');
     }
-    if (id === 'generate-sec' && typeof refreshClassSelect === 'function') {
+    if ((id === 'generate-sec' || id === 'process-sec') && typeof refreshClassSelect === 'function') {
         refreshClassSelect().catch(() => {});
+    }
+    if (id === 'process-sec') {
+        applyProcessModeDisabledState();
     }
 }
 
@@ -294,7 +297,7 @@ function pickFile(inputId, acceptExts) {
     const useFolderBtn = document.getElementById('file-picker-use-folder');
     if (useFolderBtn) useFolderBtn.classList.add('hidden');
     filePicker.classList.remove('hidden');
-    loadFilePickerDir(".");
+    loadFilePickerDir(lastPickerDir);
 }
 
 function pickFolder(inputId) {
@@ -304,7 +307,7 @@ function pickFolder(inputId) {
     const useFolderBtn = document.getElementById('file-picker-use-folder');
     if (useFolderBtn) useFolderBtn.classList.remove('hidden');
     filePicker.classList.remove('hidden');
-    loadFilePickerDir(".");
+    loadFilePickerDir(lastPickerDir);
 }
 
 function useCurrentPickerFolder() {
@@ -336,6 +339,7 @@ async function loadFilePickerDir(dir) {
         const data = await res.json();
         if (data.status === "success") {
             document.getElementById('file-picker-dir').textContent = data.current_dir;
+            lastPickerDir = data.current_dir;
             const list = document.getElementById('file-picker-list');
             list.innerHTML = '';
             for (let entry of data.entries) {
@@ -365,7 +369,10 @@ async function loadFilePickerDir(dir) {
                         } else if (currentPickerInput === 'proc-assnversions-path') {
                             syncProcessNameFromPath();
                             bustScanImageCache();
-                        } else if (currentPickerInput === 'proc-tiff-path' || currentPickerInput === 'grade-assn-path') {
+                        } else if (currentPickerInput === 'proc-tiff-path') {
+                            syncProcessNameFromTiff();
+                            bustScanImageCache();
+                        } else if (currentPickerInput === 'grade-assn-path') {
                             bustScanImageCache();
                         }
                         closeFilePicker();
@@ -459,10 +466,55 @@ function syncGenerateNameFromPath() {
 }
 
 function syncProcessNameFromPath() {
+    if (isNonBiscuitMode()) return;
     const assnVersionsPath = document.getElementById('proc-assnversions-path').value;
     const parts = splitPath(assnVersionsPath);
     document.getElementById('proc-new-name').value = stripExtension(parts.file, ".assnversions");
     updateProcessNameStatus();
+}
+
+// Non-Biscuit runs have no .assnversions to name the output after, so follow the TIFF instead.
+function syncProcessNameFromTiff() {
+    if (!isNonBiscuitMode()) return;
+    const tiffPath = document.getElementById('proc-tiff-path').value;
+    const parts = splitPath(tiffPath);
+    document.getElementById('proc-new-name').value = stripExtension(parts.file, ".tif");
+    updateProcessNameStatus();
+}
+
+function isNonBiscuitMode() {
+    const checkbox = document.getElementById('proc-non-biscuit');
+    return !!(checkbox && checkbox.checked);
+}
+
+function setProcessControlsDisabled(container, disabled) {
+    if (!container) return;
+    container.classList.toggle('is-disabled', !!disabled);
+    for (const el of container.querySelectorAll('input, select, button, textarea')) {
+        el.disabled = !!disabled;
+    }
+}
+
+function applyProcessModeDisabledState() {
+    const nonBiscuit = isNonBiscuitMode();
+    setProcessControlsDisabled(document.getElementById('proc-biscuit-group'), nonBiscuit);
+    // Name Reader crops the printed name field, which non-Biscuit scans do not have.
+    setProcessControlsDisabled(document.getElementById('proc-namereader-row'), nonBiscuit);
+    const fields = document.getElementById('proc-non-biscuit-fields');
+    if (fields) fields.classList.toggle('hidden', !nonBiscuit);
+}
+
+function updateProcessModeUi() {
+    applyProcessModeDisabledState();
+    const nonBiscuit = isNonBiscuitMode();
+    if (nonBiscuit) {
+        if (document.getElementById('proc-tiff-path').value.trim()) syncProcessNameFromTiff();
+        else updateProcessNameStatus();
+    } else if (document.getElementById('proc-assnversions-path').value.trim()) {
+        syncProcessNameFromPath();
+    } else {
+        updateProcessNameStatus();
+    }
 }
 
 async function updateGenerateNameStatus() {
@@ -476,10 +528,12 @@ async function updateGenerateNameStatus() {
 }
 
 async function updateProcessNameStatus() {
-    const assnVersionsPath = document.getElementById('proc-assnversions-path').value;
+    const basePath = isNonBiscuitMode()
+        ? document.getElementById('proc-tiff-path').value
+        : document.getElementById('proc-assnversions-path').value;
     const newNameInput = document.getElementById('proc-new-name');
     const warning = document.getElementById('proc-name-warning');
-    const parts = splitPath(assnVersionsPath);
+    const parts = splitPath(basePath);
     const targetName = `${newNameInput.value.trim()}.assn`;
     const exists = await fileExistsInDir(parts.dir || ".", targetName);
     setNameFieldState(newNameInput, warning, exists, ".assn");
@@ -536,22 +590,47 @@ function generateAssnFiles() {
 
 function processScans() {
     const tiffPath = document.getElementById('proc-tiff-path').value;
-    const assnPath = document.getElementById('proc-assnversions-path').value;
     const newFileName = document.getElementById('proc-new-name').value.trim();
+    const nonBiscuit = isNonBiscuitMode();
     const out = document.getElementById('proc-output');
+
+    const payload = { tiff_file: tiffPath, new_file_name: newFileName };
+    if (nonBiscuit) {
+        const pagesPerStudent = parseInt(document.getElementById('proc-pages-per-student').value, 10);
+        const totalPoints = parseFloat(document.getElementById('proc-total-points').value);
+        if (!Number.isInteger(pagesPerStudent) || pagesPerStudent < 1) {
+            showMessageModal({
+                title: 'Invalid Input',
+                message: 'Num Pages Per Student must be a whole number of at least 1.',
+            });
+            return;
+        }
+        if (!Number.isFinite(totalPoints) || totalPoints < 0) {
+            showMessageModal({
+                title: 'Invalid Input',
+                message: 'Total Points must be a number of at least 0.',
+            });
+            return;
+        }
+        const classSelect = document.getElementById('proc-class-select');
+        payload.non_biscuit = true;
+        payload.pages_per_student = pagesPerStudent;
+        payload.total_points = totalPoints;
+        payload.assn_type = document.getElementById('proc-assn-type').value;
+        payload.class_name = classSelect ? classSelect.value.trim() : '';
+    } else {
+        payload.assn_file = document.getElementById('proc-assnversions-path').value;
+        payload.namereader_file = document.getElementById('proc-namereader-path').value.trim();
+    }
+
     out.textContent = "Running...\n";
-    
+
     if (activeProcessSocket && activeProcessSocket.readyState <= WebSocket.OPEN) {
         activeProcessSocket.close(1000, "Starting new process run");
     }
     const ws = new WebSocket(`ws://${location.host}/api/ws_process`);
     activeProcessSocket = ws;
-    ws.onopen = () => ws.send(JSON.stringify({
-        tiff_file: tiffPath,
-        assn_file: assnPath,
-        new_file_name: newFileName,
-        namereader_file: document.getElementById('proc-namereader-path').value.trim()
-    }));
+    ws.onopen = () => ws.send(JSON.stringify(payload));
     ws.onmessage = (event) => {
         out.textContent += event.data;
         out.scrollTop = out.scrollHeight;
@@ -559,7 +638,8 @@ function processScans() {
             const succeeded = !/\nError:/.test(out.textContent) && !out.textContent.startsWith("Error:");
             if (succeeded) {
                 bustScanImageCache();
-                openVerifyPrompt();
+                // Verify Scans only fixes data matrix / anchor reads, which this mode never does.
+                if (!nonBiscuit) openVerifyPrompt();
             }
             ws.close(1000, "Run complete");
         }

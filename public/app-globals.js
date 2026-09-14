@@ -40,6 +40,8 @@ const startGradingLabel = document.getElementById('start-grading-label');
 let currentPickerInput = null;
 let currentPickerAcceptExts = null;
 let currentPickerFolderMode = false;
+// Folder the picker last displayed, so every picker reopens where browsing left off this session.
+let lastPickerDir = ".";
 let gradingData = {};
 // Bumped on every scan render so that asynchronous page loads from a superseded render (the grader
 // navigated away before images finished loading) can detect they are stale and do nothing.
