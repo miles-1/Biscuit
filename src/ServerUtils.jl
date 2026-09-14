@@ -864,38 +864,51 @@ function patch_detailed_csv_drive_links_after_upload(summary)::Nothing
     return nothing
 end
 
-function _workspace_dir_for_preview()::String
-    try
-        resolve_under_workspace(".")
+function _resolve_workspace_source_file(raw)::Union{Nothing,String}
+    isa(raw, AbstractString) || return nothing
+    stripped = strip(String(raw))
+    isempty(stripped) && return nothing
+    rel = try
+        resolve_under_workspace(stripped)
     catch
-        pwd()
+        return nothing
     end
+    abs = abspath(rel)
+    return isfile(abs) ? abs : nothing
 end
 
-function _ensure_builder_preview_dir!()::Tuple{String,String}
+function _preview_work_dir(source_path)::String
+    abs_file = _resolve_workspace_source_file(source_path)
+    return isnothing(abs_file) ? abspath(pwd()) : dirname(abs_file)
+end
+
+function _rel_under(root::String, path::String)::String
+    return replace(relpath(abspath(path), abspath(root)), "\\" => "/")
+end
+
+function _ensure_builder_preview_dir!(; source_path=nothing)::Tuple{String,String,String}
+    work_dir = _preview_work_dir(source_path)
     preview_dir = get(STATE, "preview_dir", nothing)
-    preview_id = get(STATE, "preview_id", nothing)
-    if !(isa(preview_dir, AbstractString) && isdir(preview_dir))
-        preview_dir = mktempdir(_workspace_dir_for_preview())
+    stored_work = get(STATE, "preview_work_dir", nothing)
+    if !(isa(preview_dir, AbstractString) && isdir(preview_dir)) || stored_work != work_dir
+        if isa(preview_dir, AbstractString) && isdir(preview_dir)
+            try
+                rm(preview_dir; force=true, recursive=true)
+            catch
+            end
+        end
+        preview_dir = mktempdir(work_dir)
         STATE["preview_dir"] = preview_dir
-        preview_id = string(rand(UInt64), base=16)
-        STATE["preview_id"] = preview_id
+        STATE["preview_work_dir"] = work_dir
+        STATE["preview_id"] = string(rand(UInt64), base=16)
         STATE["question_preview_hash"] = nothing
-    elseif !isa(preview_id, AbstractString) || isempty(String(preview_id))
+    end
+    preview_id = get(STATE, "preview_id", nothing)
+    if !isa(preview_id, AbstractString) || isempty(String(preview_id))
         preview_id = string(rand(UInt64), base=16)
         STATE["preview_id"] = preview_id
     end
-    return (String(preview_dir), String(preview_id))
-end
-
-function _copy_question_preview_sources!(preview_dir::String)::Nothing
-    src_dir = joinpath(package_root(), "typst_doc_generators")
-    for name in ("assignment.typ", "question_preview.typ")
-        src = joinpath(src_dir, name)
-        isfile(src) || error("Missing Typst source: $src")
-        cp(src, joinpath(preview_dir, name); force=true)
-    end
-    return nothing
+    return (String(preview_dir), String(preview_id), String(work_dir))
 end
 
 function _json_cache_key(obj)::String

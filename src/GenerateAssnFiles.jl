@@ -565,6 +565,20 @@ function process_node(node::Dict, index::Int, is_key::Bool, rng::AbstractRNG, co
     end
 end
 
+# Top-level items are sections or pick banks (not a flat question list).
+function _top_level_is_grouped(questions)::Bool
+    return !isempty(questions) && all(q -> isa(q, AbstractDict) && haskey(q, "questions"), questions)
+end
+
+function process_top_level_questions(questions, is_key::Bool, rng::AbstractRNG, config::NamedTuple)
+    n = length(questions)
+    indices = collect(0:(n - 1))
+    if !is_key && config.shuffle_q && !_top_level_is_grouped(questions)
+        shuffle!(rng, indices)
+    end
+    return [process_node(questions[i + 1], i, is_key, rng, config) for i in indices]
+end
+
 # One sampled selection node for live builder preview (canonical option order, frozen vars).
 function preview_selection_for_question(question::Dict; seed::Integer=1234)
     rng = Xoshiro(Int64(seed))
@@ -576,27 +590,38 @@ function preview_selection_for_question(question::Dict; seed::Integer=1234)
     return isa(result, Dict) ? result : Dict{String, Any}("indx" => 0)
 end
 
-function generate_selection_json(; master_file::String, output_dir::String)::String
+function generate_selection_json(; master_file::String, output_dir::String, preview::Bool=false)::String
     master = JSON.parsefile(master_file)
     output_file = joinpath(output_dir, "selection.json")
     seed = get(master, "seed", 1234)
-    rng = Xoshiro(seed) 
-    shuffle_q = get(master, "shuffle_questions", false)
-    shuffle_a = get(master, "shuffle_answers", false)
+    rng = Xoshiro(seed)
+    shuffle_q = Bool(get(master, "shuffle_questions", false))
+    shuffle_a = Bool(get(master, "shuffle_answers", false))
     version_count = get(master, "version_count", 1)
-    config = (; shuffle_q, shuffle_a)
-    versions = []
-    key_version = Dict("is_key" => true, "questions" => [])
-    for (i, sec) in enumerate(master["questions"])
-        push!(key_version["questions"], process_node(sec, i - 1, true, rng, config))
+    if preview && version_count > 0
+        version_count = 1
     end
-    push!(versions, key_version)
+    config = (; shuffle_q, shuffle_a)
+    questions = master["questions"]
+    versions = []
+    key_version = Dict(
+        "is_key" => true,
+        "questions" => process_top_level_questions(questions, true, rng, config),
+    )
+    student_versions = []
     for assn_id in 0:(version_count - 1)
-        student_version = Dict("assn_id" => assn_id, "questions" => [])
-        for (i, sec) in enumerate(master["questions"])
-            push!(student_version["questions"], process_node(sec, i - 1, false, rng, config))
-        end
-        push!(versions, student_version)
+        push!(student_versions, Dict(
+            "assn_id" => assn_id,
+            "questions" => process_top_level_questions(questions, false, rng, config),
+        ))
+    end
+    # Preview shows a student copy first so shuffle is visible; generate keeps key first.
+    if preview
+        append!(versions, student_versions)
+        push!(versions, key_version)
+    else
+        push!(versions, key_version)
+        append!(versions, student_versions)
     end
     selection = Dict("versions" => versions)
     open(output_file, "w") do f; JSON.print(f, selection) end
@@ -665,9 +690,8 @@ function generate_assn_files(
     single_doc_export = Bool(get(master, "single_doc_export", false))
     will_print_double_sided = Bool(get(master, "will_print_double_sided", true))
     
-    # Convert to relative paths early since Typst reads from stdin and resolves relative to CWD
-    master_file = replace(relpath(master_file_raw), "\\" => "/")
-    base_dir = dirname(abspath(master_file_raw))
+    master_file = abspath(master_file_raw)
+    base_dir = dirname(master_file)
     stem = if output_name !== nothing && !isempty(strip(String(output_name)))
         strip(String(output_name))
     else
@@ -676,8 +700,8 @@ function generate_assn_files(
     assn_versions_file = joinpath(base_dir, stem * ".assnversions")
     
     mktempdir(base_dir) do temp_dir_raw
-        temp_dir = replace(relpath(temp_dir_raw), "\\" => "/")
-        println("Created: $temp_dir")
+        temp_dir = abspath(temp_dir_raw)
+        println("Created: $(replace(relpath(temp_dir), "\\" => "/"))")
         println("Added: master.json")
         if class_csv_file !== nothing && !isempty(strip(String(class_csv_file)))
             println("Added: $(basename(String(class_csv_file)))")

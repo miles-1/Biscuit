@@ -1424,6 +1424,7 @@ async function requestQuestionPreview() {
                 margin: typeof m.margin === 'number' ? m.margin : 1.5,
                 seed: typeof m.seed === 'number' && m.seed > 0 ? m.seed : 1234,
                 is_key: true,
+                source_path: builderState.filePath || '',
             }),
         });
         const data = await res.json();
@@ -1526,7 +1527,10 @@ async function triggerPreview() {
         const res = await fetch('/api/preview_master_json', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ master: masterPayload }),
+            body: JSON.stringify({
+                master: masterPayload,
+                source_path: builderState.filePath || '',
+            }),
         });
         const data = await res.json();
         if (!res.ok || data.status !== 'success') {

@@ -922,7 +922,7 @@ end
     end
 
     return lock(PREVIEW_COMPILE_LOCK) do
-        preview_dir, preview_id = _ensure_builder_preview_dir!()
+        preview_dir, preview_id, work_dir = _ensure_builder_preview_dir!(; source_path=get(data, "source_path", nothing))
         _clear_full_preview_pages!(preview_dir)
 
         master_file_path = joinpath(preview_dir, "master.json")
@@ -936,26 +936,32 @@ end
             selection_file = GenerateAssnFiles.generate_selection_json(;
                 master_file=master_file_path,
                 output_dir=preview_dir,
+                preview=true,
             )
 
-            master_rel = replace(relpath(master_file_path), "\\" => "/")
-            selection_rel = replace(relpath(selection_file), "\\" => "/")
             source_file = Commands.assn_typst_file()
             out_pattern = joinpath(preview_dir, "page-{p}.png")
             will_print_double_sided = Bool(get(master_data, "will_print_double_sided", true))
+            work_abs = abspath(work_dir)
 
             args = [
                 "compile",
-                "--input", "master=$master_rel",
-                "--input", "selection=$selection_rel",
+                "--root", ".",
+                "--input", "master=$(_rel_under(work_abs, master_file_path))",
+                "--input", "selection=$(_rel_under(work_abs, selection_file))",
                 "--input", "single_doc_export=true",
                 "--input", "will_print_double_sided=$will_print_double_sided",
                 "--ppi", "144",
                 "-",
-                out_pattern,
+                _rel_under(work_abs, out_pattern),
             ]
 
-            cmd = pipeline(`typst $args`, stdin=source_file, stdout=stdout_buf, stderr=stderr_buf)
+            cmd = pipeline(
+                Cmd(`typst $args`; dir=work_abs);
+                stdin=source_file,
+                stdout=stdout_buf,
+                stderr=stderr_buf,
+            )
             run(cmd)
 
             pages = Int[]
@@ -1055,7 +1061,7 @@ end
     payload_hash = _json_cache_key(preview_payload)
 
     return lock(PREVIEW_COMPILE_LOCK) do
-        preview_dir, preview_id = _ensure_builder_preview_dir!()
+        preview_dir, preview_id, work_dir = _ensure_builder_preview_dir!(; source_path=get(data, "source_path", nothing))
         svg_path = joinpath(preview_dir, "question.svg")
         if get(STATE, "question_preview_hash", nothing) == payload_hash && isfile(svg_path)
             return Dict(
@@ -1066,7 +1072,6 @@ end
             )
         end
 
-        _copy_question_preview_sources!(preview_dir)
         preview_json = joinpath(preview_dir, "preview.json")
         open(preview_json, "w") do f
             JSON.print(f, preview_payload)
@@ -1082,7 +1087,7 @@ end
             typst_compile_question_preview(;
                 preview_json=preview_json,
                 output_svg=tmp_svg,
-                preview_root=preview_dir,
+                work_dir=work_dir,
                 stdout_io=stdout_buf,
                 stderr_io=stderr_buf,
             )
