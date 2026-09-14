@@ -106,10 +106,13 @@ Prism.languages.typst = {
       // pattern: /(?<=#([a-zA-Z][\w-.]*)?\()(?:[^)(]|\((?:[^)(]|\((?:[^)(]|\((?:[^)(]|\((?:[^)(]|\([^)(]*\))*\))*\))*\))*\))*\)/,
       // between # and ( either
       // - nothing: #(
-      // - Declaration: #let ... (
-      // - Function call: #my-func2(
-      // # 
-      pattern: /(?<!\\)#.*?\((?:[^)(]|\((?:[^)(]|\((?:[^)(]|\((?:[^)(]|\((?:[^)(]|\([^)(]*\))*\))*\))*\))*\))*\)(?![ \t]*=)/,
+      // - Function call: #my-func2( or #module.func(
+      // Only identifier-path characters may sit between the # and the (, because in Typst a call's
+      // parens follow the callee directly. The original `.*?` here let arbitrary prose intervene, so
+      // any `#variable` followed later in the line by any parenthesized text swallowed everything
+      // between into one code span -- "#BLANK hello `(no good)`" even split the raw span apart.
+      // Declarations like `#let f(x) = 1` still reach the `#let ...` pattern further down.
+      pattern: /(?<!\\)#[\w\-.]*\((?:[^)(]|\((?:[^)(]|\((?:[^)(]|\((?:[^)(]|\((?:[^)(]|\([^)(]*\))*\))*\))*\))*\))*\)(?![ \t]*=)/,
       // pattern: /(?:#(?:(?:let.*?)|(?:[\w\-.]+?)|(?:)))\((?:[^)(]|\((?:[^)(]|\((?:[^)(]|\((?:[^)(]|\((?:[^)(]|\([^)(]*\))*\))*\))*\))*\))*\)(?!\s*=)/,
       // lookbehind: true,
       inside: Prism.languages["typst-code"],

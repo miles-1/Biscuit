@@ -51,6 +51,141 @@ atexit() do
         catch
         end
     end
+
+    pid_file = get(STATE, "pid_file", nothing)
+    if isa(pid_file, String)
+        try
+            rm(pid_file; force=true)
+        catch
+        end
+    end
+end
+
+### Single-instance takeover ###
+
+# Biscuit binds a fixed port and keeps per-user state under ~/.config/biscuit, so an instance left
+# behind by a closed terminal blocks the next launch. Each run records its pid for the port it
+# claimed; the next run retires that pid first. Before signalling anything we re-read the live
+# process's command line and require it to match what was recorded, so a pid that has since been
+# recycled by an unrelated program is reported and skipped rather than killed.
+
+_pid_file_path(port::Integer)::String = joinpath(config_dir(), "biscuit-$port.pid")
+
+"""
+Command line of `pid` as the OS reports it, or `nothing` when no such process is running.
+"""
+function _live_command_line(pid::Integer)::Union{Nothing,String}
+    cmd = if Sys.iswindows()
+        Cmd(["powershell", "-NoProfile", "-Command",
+             "(Get-CimInstance Win32_Process -Filter 'ProcessId=$pid').CommandLine"])
+    else
+        Cmd(["ps", "-p", string(pid), "-o", "command="])
+    end
+    out = try
+        read(cmd, String)
+    catch
+        return nothing # non-zero exit means no such pid
+    end
+    text = strip(out)
+    return isempty(text) ? nothing : String(text)
+end
+
+function _write_pid_file(port::Integer)::String
+    path = _pid_file_path(port)
+    mkpath(dirname(path))
+    open(path, "w") do f
+        JSON.print(f, Dict{String, Any}(
+            "pid" => getpid(),
+            "port" => Int(port),
+            # Captured through the same query used to re-identify the pid later, so the recorded
+            # and live strings are directly comparable.
+            "command" => something(_live_command_line(getpid()), ""),
+            "started" => string(Dates.now()),
+        ))
+    end
+    return path
+end
+
+function _signal_pid(pid::Integer, force::Bool)::Bool
+    cmd = if Sys.iswindows()
+        force ? Cmd(["taskkill", "/F", "/PID", string(pid)]) : Cmd(["taskkill", "/PID", string(pid)])
+    else
+        Cmd(["kill", force ? "-KILL" : "-TERM", string(pid)])
+    end
+    try
+        run(pipeline(cmd; stdout=devnull, stderr=devnull))
+        return true
+    catch
+        return false
+    end
+end
+
+function _wait_for_exit(pid::Integer, seconds::Real)::Bool
+    deadline = time() + seconds
+    while time() < deadline
+        _live_command_line(pid) === nothing && return true
+        sleep(0.15)
+    end
+    return _live_command_line(pid) === nothing
+end
+
+function _retire_previous_instance!(port::Integer)::Nothing
+    path = _pid_file_path(port)
+    isfile(path) || return nothing
+    record = try
+        JSON.parsefile(path)
+    catch
+        rm(path; force=true)
+        return nothing
+    end
+    raw_pid = get(record, "pid", nothing)
+    if !isa(raw_pid, Integer)
+        rm(path; force=true)
+        return nothing
+    end
+    pid = Int(raw_pid)
+    pid == getpid() && return nothing
+    live = _live_command_line(pid)
+    if live === nothing
+        rm(path; force=true) # stale record, process already gone
+        return nothing
+    end
+    recorded = String(get(record, "command", ""))
+    if isempty(recorded) || live != recorded
+        @warn "Ignoring stale Biscuit pid file: pid $pid now belongs to a different process" path
+        rm(path; force=true)
+        return nothing
+    end
+    println("Found a previous Biscuit instance (pid $pid) on port $port; shutting it down...")
+    flush(stdout)
+    # SIGTERM first so the atexit hook can fold in-progress grading back into the .assn archive.
+    _signal_pid(pid, false)
+    if !_wait_for_exit(pid, 5)
+        println("  Previous instance did not exit on request; forcing it.")
+        flush(stdout)
+        _signal_pid(pid, true)
+        _wait_for_exit(pid, 2)
+    end
+    if _live_command_line(pid) === nothing
+        println("  Previous instance stopped.")
+    else
+        @warn "Could not stop the previous Biscuit instance; port $port may still be in use" pid
+    end
+    flush(stdout)
+    rm(path; force=true)
+    return nothing
+end
+
+# Never let pid bookkeeping stop a launch: a sandboxed or unusual environment that cannot run
+# `ps` should still get a server.
+function _claim_single_instance!(port::Integer)::Nothing
+    try
+        _retire_previous_instance!(port)
+        STATE["pid_file"] = _write_pid_file(port)
+    catch e
+        @warn "Could not check for a previous Biscuit instance; continuing" exception=e
+    end
+    return nothing
 end
 
 include("ServerUtils.jl")
@@ -133,6 +268,7 @@ Start the Oxygen HTTP server (blocking). Prefer:
 """
 function serve(; host="127.0.0.1", port=8080, kwargs...)
     _register_routes!()
+    _claim_single_instance!(port)
     return Oxygen.serve(; host, port, kwargs...)
 end
 
@@ -143,6 +279,7 @@ Start the Oxygen HTTP server with parallel request handling (blocking).
 """
 function serveparallel(; host="127.0.0.1", port=8080, kwargs...)
     _register_routes!()
+    _claim_single_instance!(port)
     return Oxygen.serveparallel(; host, port, kwargs...)
 end
 

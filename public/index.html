@@ -415,6 +415,24 @@
         </div>
     </div>
 
+    <div id="feedback-template-modal" class="hidden modal-overlay" role="dialog" aria-modal="true" aria-labelledby="feedback-template-title">
+        <div class="modal-card">
+            <div class="modal-card-header">
+                <h3 id="feedback-template-title">New Feedback Template</h3>
+                <button type="button" class="modal-close-btn" id="feedback-template-close" aria-label="Close">&times;</button>
+            </div>
+            <textarea id="feedback-template-text" class="feedback-template-input" rows="5" placeholder="e.g. Nice work {{name}}, but the units are missing (-1)"></textarea>
+            <div class="feedback-template-help">
+                <p><strong>Student's name.</strong> Write <code>{{name}}</code> anywhere in the template and it is replaced with the student's first name each time you apply the template.</p>
+                <p><strong>Point deductions.</strong> Write <code>(-N)</code> &mdash; for example <code>(-1)</code> or <code>(-2.5)</code> &mdash; to take N points off the question's maximum. Every marker in the feedback box is highlighted and their total is subtracted, so on a 10&nbsp;point question <code>(-2.5)</code> plus <code>(-1)</code> scores 6.5. The score box turns read-only while any marker is present, and clearing them all resets the question to ungraded. This works only on questions you score by typing a number, not on rubric or bubble questions.</p>
+            </div>
+            <div class="modal-actions">
+                <button type="button" id="feedback-template-save">Save Template</button>
+                <button type="button" id="feedback-template-cancel">Cancel</button>
+            </div>
+        </div>
+    </div>
+
     <div id="verify-prompt-modal" class="hidden modal-overlay" role="dialog" aria-modal="true" aria-labelledby="verify-prompt-title">
         <div class="modal-card">
             <div class="modal-card-header">

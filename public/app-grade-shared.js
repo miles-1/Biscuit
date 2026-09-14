@@ -165,6 +165,11 @@ function isSectionVisible(el) {
     return !!(el && !el.classList.contains('hidden'));
 }
 
+// While a modal is up it owns the keyboard; the global nav/Tab shortcuts must stay out of its way.
+function isAnyModalOpen() {
+    return !!document.querySelector('.modal-overlay:not(.hidden)');
+}
+
 function focusNavSentinel(sentinelId) {
     const el = document.getElementById(sentinelId);
     if (el) el.focus({ preventScroll: true });
@@ -173,6 +178,7 @@ function focusNavSentinel(sentinelId) {
 function fillScoreInputMaxPoints() {
     const scoreInput = document.getElementById('score-input');
     if (!scoreInput) return;
+    if (scoreInput.readOnly) return; // feedback deductions own the score
     const maxRaw = scoreInput.dataset.maxPoints;
     if (maxRaw === undefined || maxRaw === '') return;
     scoreInput.value = String(maxRaw);
@@ -212,6 +218,7 @@ function getActiveTabCycleFields() {
 
 // Shared arrow-key navigation for verify + both grading steps.
 document.addEventListener('keydown', function(e) {
+    if (isAnyModalOpen()) return;
     if (isFormFieldFocused()) {
         // Full credit shortcut when a manual score field is present.
         if ((e.key === 'f' || e.key === 'F')
@@ -254,6 +261,7 @@ document.addEventListener('keydown', function(e) {
 // Trap Tab inside the short verify / grade-question field cycles.
 document.addEventListener('keydown', function(e) {
     if (e.key !== 'Tab') return;
+    if (isAnyModalOpen()) return;
     const fields = getActiveTabCycleFields();
     if (!fields || fields.length === 0) return;
     e.preventDefault();

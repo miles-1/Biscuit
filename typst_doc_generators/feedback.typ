@@ -68,6 +68,7 @@
     }
     document(student_file_name)[
       #set page(paper:"us-letter", margin:(right:1.5cm,y:1.5cm,left:1.5cm+1em))
+      #show link: it => text(blue, underline(it))
       #show heading: h => pad(left:-1.3em, grid(
         columns:2,
         gutter:0.5em,

@@ -637,6 +637,52 @@ function scoresEqual(a, b) {
     return Number(a) === Number(b);
 }
 
+// Deduction sums such as 10 - 0.1 - 0.2 must not leak float noise into the score box.
+function roundScore(value) {
+    return Math.round(value * 1e6) / 1e6;
+}
+
+// Templates accumulate rather than replace: keep the existing note and start the new one two
+// lines below it, topping up whatever newlines are already there.
+function appendFeedbackTemplate(existing, template) {
+    const current = String(existing || "");
+    if (current === "") return template;
+    const gap = current.endsWith("\n\n") ? "" : (current.endsWith("\n") ? "\n" : "\n\n");
+    return current + gap + template;
+}
+
+// Resolves to the typed template text, or null if the grader backed out.
+function openFeedbackTemplateModal() {
+    return new Promise((resolve) => {
+        const modal = document.getElementById('feedback-template-modal');
+        const textarea = document.getElementById('feedback-template-text');
+        const saveBtn = document.getElementById('feedback-template-save');
+        const cancelBtn = document.getElementById('feedback-template-cancel');
+        const closeBtn = document.getElementById('feedback-template-close');
+        if (!modal || !textarea || !saveBtn || !cancelBtn || !closeBtn) {
+            resolve(null);
+            return;
+        }
+        textarea.value = '';
+        modal.classList.remove('hidden');
+        textarea.focus();
+        const finish = (value) => {
+            modal.classList.add('hidden');
+            saveBtn.onclick = null;
+            cancelBtn.onclick = null;
+            closeBtn.onclick = null;
+            modal.onkeydown = null;
+            resolve(value);
+        };
+        saveBtn.onclick = () => finish(textarea.value);
+        cancelBtn.onclick = () => finish(null);
+        closeBtn.onclick = () => finish(null);
+        modal.onkeydown = (e) => {
+            if (e.key === 'Escape') finish(null);
+        };
+    });
+}
+
 // Normalize a master-json rubric row into chip options for the grading UI.
 // Supports legacy `{points, desc}` and newer `{desc, max, "0": "...", "<max>": "..."}` forms.
 function parseRubricRow(entry, idx) {
@@ -785,7 +831,11 @@ async function renderGradeStep() {
     
     const optContainer = document.getElementById('grading-options');
     optContainer.innerHTML = '';
-    
+
+    // Set by the score-by-input branch below; the feedback box calls it so `(-N)` markers can drive
+    // the score. Staying null means this question type has no such field and ignores the markers.
+    let applyFeedbackDeductions = null;
+
     if (qType === 'multiple_choice' || qType === 'true_false') {
         if (pts != null) currentItem.max_points = Number(pts);
         renderBubbles(optContainer, qType, currentItem, pts, masterQ.options.length);
@@ -911,24 +961,60 @@ async function renderGradeStep() {
                 invalidMsg.classList.add('score-invalid-msg');
                 invalidMsg.textContent = 'Score appears invalid';
 
+                // `(-N)` markers in the feedback deduct from the maximum. While any are present they
+                // own the score and the field goes read-only, so the feedback text stays the single
+                // source of truth for the grade.
+                let deductionsDriveScore = parseFeedbackDeductions(currentItem.feedback || "").length > 0;
+
+                const showScoreValidity = (value) => {
+                    const invalid = Number.isFinite(value) && (value < 0 || isScoreAboveMax(value, pts));
+                    scoreInput.classList.toggle('score-input-invalid', invalid);
+                    invalidMsg.classList.toggle('hidden', !invalid);
+                };
+
                 const syncManualScore = () => {
+                    if (deductionsDriveScore) return;
                     // Strip any minus that slipped through (paste, spinner, etc.).
                     if (scoreInput.value.includes('-')) {
                         scoreInput.value = scoreInput.value.replace(/-/g, '');
                     }
                     const raw = scoreInput.value;
                     const v = raw === "" ? undefined : parseFloat(raw);
-                    let invalid = false;
                     if (v === undefined || Number.isNaN(v)) {
                         delete currentItem.points;
                         delete currentItem.is_graded;
+                        showScoreValidity(undefined);
                     } else {
                         currentItem.points = v;
                         currentItem.is_graded = true;
-                        invalid = isScoreAboveMax(v, pts);
+                        showScoreValidity(v);
                     }
-                    scoreInput.classList.toggle('score-input-invalid', invalid);
-                    invalidMsg.classList.toggle('hidden', !invalid);
+                    updateGradeDropdowns();
+                    refreshScoreHistogram(optContainer, questionIds[currentQIndex], pts);
+                };
+
+                applyFeedbackDeductions = (text) => {
+                    const deductions = parseFeedbackDeductions(text);
+                    const wasDriven = deductionsDriveScore;
+                    deductionsDriveScore = deductions.length > 0;
+                    scoreInput.readOnly = deductionsDriveScore;
+                    if (deductionsDriveScore) {
+                        const total = roundScore(
+                            Number(pts) + deductions.reduce((acc, d) => acc + d, 0)
+                        );
+                        currentItem.points = total;
+                        currentItem.is_graded = true;
+                        scoreInput.value = String(total);
+                        showScoreValidity(total);
+                    } else if (wasDriven) {
+                        // Last marker removed: hand the field back, ungraded.
+                        delete currentItem.points;
+                        delete currentItem.is_graded;
+                        scoreInput.value = "";
+                        showScoreValidity(undefined);
+                    } else {
+                        return; // never had markers; leave a hand-typed score alone
+                    }
                     updateGradeDropdowns();
                     refreshScoreHistogram(optContainer, questionIds[currentQIndex], pts);
                 };
@@ -942,7 +1028,8 @@ async function renderGradeStep() {
                 });
                 scoreRow.appendChild(invalidMsg);
                 optContainer.appendChild(scoreRow);
-                syncManualScore();
+                if (deductionsDriveScore) applyFeedbackDeductions(currentItem.feedback || "");
+                else syncManualScore();
             }
         }
         if (pts != null && Number(pts) > 0) {
@@ -963,6 +1050,8 @@ async function renderGradeStep() {
     const feedbackInput = document.createElement('textarea');
     feedbackInput.id = `feedback-input-${currentQIndex}-${currentAssnIndexForQ}`;
     feedbackInput.classList.add("feedback-input");
+    // Highlight `(-N)` markers only where they actually drive a score.
+    if (applyFeedbackDeductions) feedbackInput.dataset.feedbackDeductions = "1";
     feedbackInput.value = currentItem.feedback || "";
     const adjustFeedbackHeight = () => {
         feedbackInput.style.height = 'auto';
@@ -970,6 +1059,7 @@ async function renderGradeStep() {
     };
     feedbackInput.oninput = (e) => {
         currentItem.feedback = e.target.value;
+        if (applyFeedbackDeductions) applyFeedbackDeductions(e.target.value);
         adjustFeedbackHeight();
     };
     feedbackWrap.appendChild(feedbackLabel);
@@ -979,9 +1069,11 @@ async function renderGradeStep() {
     const saveTemplateBtn = document.createElement('button');
     saveTemplateBtn.type = 'button';
     saveTemplateBtn.classList.add('feedback-template-save');
-    saveTemplateBtn.textContent = '+ add above feedback as template';
-    saveTemplateBtn.onclick = () => {
-        const text = feedbackInput.value;
+    saveTemplateBtn.textContent = '+ new feedback template';
+    saveTemplateBtn.onclick = async () => {
+        const typed = await openFeedbackTemplateModal();
+        if (typed === null) return;
+        const text = typed.trim();
         if (text === "") return;
         const templates = ensureFeedbackTemplates();
         if (!Array.isArray(templates[qId])) templates[qId] = [];
@@ -1045,9 +1137,13 @@ function renderFeedbackTemplateList(listEl, qId, feedbackInput, currentItem) {
         };
 
         item.onclick = () => {
-            const applied = applyFeedbackTemplateName(text);
+            const applied = appendFeedbackTemplate(
+                feedbackInput.value,
+                applyFeedbackTemplateName(text),
+            );
             feedbackInput.value = applied;
             currentItem.feedback = applied;
+            // Drives the height, deduction, and syntax-highlight listeners in one go.
             feedbackInput.dispatchEvent(new Event('input', { bubbles: true }));
         };
         item.appendChild(body);
