@@ -13,6 +13,7 @@ using ..Classes
 using ..GenerateAssnFiles
 using ..ProcessScans
 using ..NameReader
+using ..NameStore
 using ..Paths: package_root, resolve_under_workspace, config_dir
 
 export serve, serveparallel, terminate, julia_main

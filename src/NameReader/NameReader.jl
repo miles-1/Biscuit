@@ -8,8 +8,16 @@ using ..Paths: package_root
 Detect student names on scanned assignment pages.
 
 Source handwriting samples can be a flat labeled-tile folder (`label-001.png`)
-or a folder of per-student directories, as in
-`practice/EvolutionFa26_name_training_data/<lastname,firstname>/*.png`.
+or a folder of per-student directories, which is what `NameStore` maintains:
+
+```text
+<lastname,firstname>/
+  table_<id>.png    crop from a handwritten name table; composited onto a blank name line
+  assn_<id>.png     crop from a scanned assignment's name line; used as scanned
+```
+
+The two origins are augmented differently and split into training and testing
+sets independently. See `name_image_kind` and `split_name_handwriting`.
 """
 
 include("split_image_grid.jl")
@@ -78,6 +86,7 @@ export NAME_FIELD_SIZE
 export background_training_dir
 export prepare_name_image
 export compose_name_training_image
+export compose_assignment_training_image
 export load_background_images
 export preview_name_training_samples
 export NameReaderBundle
@@ -86,5 +95,15 @@ export save_name_reader
 export load_name_reader
 export class_stem_from_training_dir
 export guess_assignment_names
+
+export NAME_TABLE_IMAGE_PREFIX
+export ASSIGNMENT_IMAGE_PREFIX
+export NAME_IMAGE_KINDS
+export name_image_kind
+export name_image_id
+export name_image_prefix
+export group_name_paths_by_student
+export read_training_sidecar
+export write_training_sidecar
 
 end # module

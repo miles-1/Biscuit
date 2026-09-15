@@ -39,6 +39,7 @@ async function startGrading() {
         gradingData = setupData.grading_data || {};
         migrateGradingDataScoreFields(gradingData);
         bustScanImageCache();
+        await offerOpenArchiveRosterUpdate(setupData.roster_status);
         if (!gradingData["feedback-templates"] || typeof gradingData["feedback-templates"] !== "object") {
             gradingData["feedback-templates"] = {};
         }
@@ -64,6 +65,31 @@ async function startGrading() {
         renderAssignStep();
     } finally {
         setStartGradingLoading(false);
+    }
+}
+
+// The .assn carries its own copy of the roster from when the assignment was created. If the
+// app's copy of that class has changed since, offer to bring the archive up to date before
+// names get assigned from a stale list.
+async function offerOpenArchiveRosterUpdate(rosterStatus) {
+    if (!rosterStatus || !rosterStatus.differs || !rosterStatus.app_roster_exists) return;
+    const counts = (Number.isFinite(rosterStatus.app_num_students) && Number.isFinite(rosterStatus.archive_num_students))
+        ? `\n\nIn this .assn: ${rosterStatus.archive_num_students} student(s). In the app: ${rosterStatus.app_num_students}.`
+        : '';
+    const update = await showConfirmModal({
+        title: 'Roster Out Of Date',
+        message: `The class roster stored in this .assn differs from the app's roster for ${rosterStatus.class_name}.`
+            + `${counts}\n\nUpdate this .assn to use the app's roster?`,
+        confirmLabel: "Use App's Roster",
+        cancelLabel: 'Keep As Is',
+    });
+    if (!update) return;
+    try {
+        const res = await fetch('/api/open_archive_apply_app_roster', { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok || data.status !== 'success') throw new Error(data.message || 'Unknown error.');
+    } catch (e) {
+        showMessageModal({ title: 'Roster Not Updated', message: e.message || String(e) });
     }
 }
 

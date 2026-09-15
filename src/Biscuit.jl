@@ -43,6 +43,9 @@ using .GenerateAssnFiles
 include("NameReader/NameReader.jl")
 using .NameReader
 
+include("NameStore.jl")
+using .NameStore
+
 include("ProcessScans.jl")
 using .ProcessScans
 

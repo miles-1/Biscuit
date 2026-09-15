@@ -147,7 +147,7 @@
             <div id="proc-biscuit-group" class="proc-source-group">
                 <label for="proc-assnversions-path">Assignment Versions File Path (.assnversions):</label>
                 <div class="proc-input-row">
-                    <input type="text" id="proc-assnversions-path" oninput="syncProcessNameFromPath(); bustScanImageCache()">
+                    <input type="text" id="proc-assnversions-path" oninput="syncProcessNameFromPath(); bustScanImageCache(); scheduleProcArchiveInfoRefresh()">
                     <button type="button" onclick="pickFile('proc-assnversions-path', ['.assnversions'])">Browse</button>
                 </div>
             </div>
@@ -180,9 +180,11 @@
         <input type="text" id="proc-new-name" oninput="updateProcessNameStatus()">
         <div id="proc-name-warning" style="font-size: 12px; margin-top: 4px;"></div><br>
         <div id="proc-namereader-row">
-            <label>Name Reader File <em>(optional, .namereader)</em>:</label><br>
-            <input type="text" id="proc-namereader-path">
-            <button type="button" onclick="pickFile('proc-namereader-path', ['.namereader'])">Browse</button>
+            <label class="proc-checkbox-label" for="proc-guess-names">
+                <input type="checkbox" id="proc-guess-names" disabled>
+                Guess student names
+            </label>
+            <div id="proc-namereader-status" class="proc-hint"></div>
         </div>
         <br>
         <button onclick="processScans()">Run</button>
@@ -194,14 +196,15 @@
     <!-- 4. Name Recognition -->
     <div id="namereader-sec" class="section hidden">
         <h2>Name Recognition</h2>
-        <p>Train a name reader from per-student handwriting crops (exported in step 3). Each training sample overlays handwriting onto a randomly chosen blank name line from the package's <code>background_training_images</code> folder.</p>
-        <label>Training Data Folder:</label><br>
-        <input type="text" id="nr-handwriting-path" oninput="syncNameReaderNameFromPath()">
-        <button type="button" onclick="pickFolder('nr-handwriting-path')">Browse</button><br><br>
-        <label>New File Name (without extension):</label><br>
-        <input type="text" id="nr-output-name" oninput="updateNameReaderNameStatus()">
-        <div id="nr-name-warning" style="font-size: 12px; margin-top: 4px;"></div><br>
-        <button type="button" id="nr-train-btn" onclick="trainNameReader()">Train</button>
+        <p>Train a name reader on the handwriting Biscuit has collected for a class. Crops from a handwritten name table are overlaid onto a randomly chosen blank name line from the package's <code>background_training_images</code> folder; crops taken straight off a scanned name line are used as they are.</p>
+        <label for="nr-class-select">Select Class:</label><br>
+        <div class="class-select-row">
+            <select id="nr-class-select" onchange="refreshNameReaderClassInfo()"></select>
+            <button type="button" onclick="openClassesModal()">Add New</button>
+        </div>
+        <div id="nr-class-status" class="nr-class-status"></div>
+        <button type="button" id="nr-train-btn" onclick="trainNameReader(false)">Train</button>
+        <button type="button" id="nr-finetune-btn" onclick="trainNameReader(true)">Fine-Tune</button>
         <button type="button" id="nr-stop-btn" onclick="stopNameReaderTraining()" disabled>Cancel Training</button>
         <button type="button" onclick="goHome()">Back</button>
         <h3>Output:</h3>
@@ -411,6 +414,7 @@
             <p id="message-modal-body" class="message-modal-body"></p>
             <div class="modal-actions">
                 <button type="button" id="message-modal-ok">OK</button>
+                <button type="button" id="message-modal-cancel" class="hidden">Cancel</button>
             </div>
         </div>
     </div>

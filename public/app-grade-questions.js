@@ -1157,6 +1157,7 @@ let exportModalState = {
     scoresCsvPath: null,
     feedbackDir: null,
     nameTrainingDir: null,
+    nameTrainingSummary: null,
     driveCanUpload: false,
     driveNeedsAuthorization: false,
     driveMissing: [],
@@ -1219,7 +1220,8 @@ function showExportResultModal() {
         lines.push(`Scan feedback exported to:\n${exportModalState.feedbackDir}`);
     }
     if (exportModalState.nameTrainingDir) {
-        lines.push(`Name training data exported to:\n${exportModalState.nameTrainingDir}`);
+        const summary = exportModalState.nameTrainingSummary;
+        lines.push(`Name training data${summary ? ` (${summary})` : ''} stored in:\n${exportModalState.nameTrainingDir}`);
     }
     const bodyParts = [
         `<div class="path-block">${lines.join("\n\n")}</div>`,
@@ -1526,6 +1528,7 @@ async function finishGrading() {
             scoresCsvPath: null,
             feedbackDir: null,
             nameTrainingDir: null,
+            nameTrainingSummary: null,
             driveCanUpload: false,
             driveNeedsAuthorization: false,
             driveMissing: [],
@@ -1565,11 +1568,15 @@ async function finishGrading() {
             try { ntData = await ntRes.json(); } catch (e) { /* fall through */ }
             if (ntRes.ok && ntData.status === "success") {
                 exportModalState.nameTrainingDir = ntData.output_dir || null;
+                exportModalState.nameTrainingSummary = ntData.exported
+                    ? `Added ${ntData.added} name image(s) for ${ntData.students} student(s)`
+                        + `${ntData.skipped ? `, skipped ${ntData.skipped} already stored` : ''}.`
+                    : null;
             } else {
-                errors.push(ntData.message || "Failed to export name training data.");
+                errors.push(ntData.message || "Failed to store name training data.");
             }
         } catch (e) {
-            errors.push("Failed to export name training data.");
+            errors.push("Failed to store name training data.");
         }
 
         if (errors.length && !exportModalState.detailedCsvPath && !exportModalState.scoresCsvPath && !exportModalState.feedbackDir && !exportModalState.nameTrainingDir) {

@@ -8,6 +8,8 @@ export make_archive_from_dir
 export create_archive
 export with_archive_dir
 export extract_archive
+export archive_entry_names
+export extract_archive_entry
 export ExistingTempArchiveError
 
 const JSON_FILES = (
@@ -81,6 +83,43 @@ function create_archive(;
         make_archive_from_dir(temp_dir, archive_path; rebuild=false)
     end
     return archive_path
+end
+
+function archive_entry_names(archive_path::AbstractString)::Vector{String}
+    @assert isfile(archive_path) "Archive path does not exist: $archive_path"
+    reader = ZipFile.Reader(String(archive_path))
+    try
+        return [entry.name for entry in reader.files if !endswith(entry.name, '/')]
+    finally
+        close(reader)
+    end
+end
+
+"""
+Copy one entry out of an archive without unpacking the rest, which matters for
+`.assn` files carrying every scanned page. Returns `dest_path`, or `nothing` when
+the archive has no such entry.
+"""
+function extract_archive_entry(
+    archive_path::AbstractString,
+    entry_name::AbstractString,
+    dest_path::AbstractString,
+)::Union{String, Nothing}
+    @assert isfile(archive_path) "Archive path does not exist: $archive_path"
+    reader = ZipFile.Reader(String(archive_path))
+    try
+        for zip_entry in reader.files
+            zip_entry.name == entry_name || continue
+            mkpath(dirname(abspath(String(dest_path))))
+            open(String(dest_path), "w") do f
+                write(f, read(zip_entry))
+            end
+            return String(dest_path)
+        end
+    finally
+        close(reader)
+    end
+    return nothing
 end
 
 function _safe_archive_target(temp_dir::AbstractString, entry_name::AbstractString)::String

@@ -19,15 +19,15 @@ const WORKFLOW_STEP_TOOLTIPS = {
     'assn': 'Step [2] generates this file, which contains scanned pages of student work, computer-detected answers, and all other information required for grading.',
     'feedback-pdfs': 'Step [3] generates these per-student feedback `.pdf`s exported after grading.\n - #drive If the class roster included an `Email` column when the assignment was created (see step [1]), Finish & Export can upload PDFs under `Biscuit/class_name` in Google Drive after a one-time Google account link.',
     'grades-csvs': 'Step [3] exports two scores spreadsheets: one detailed version with per-question information, and a second with student totals.\n - #canvas If the class roster included an `ID` column when the assignment was created (see step [1]), the second spreadsheet can be uploaded directly to Canvas for score submission.',
-    'training-data': '_(Optional)_ #namereader A folder containing one folder per student containing cropped name-box images collected for name recognition training. Note this is only generated if your assignment was enabled to do this in step [1].',
-    'namereader': '_(Optional)_ #namereader Step [4] generates this file, which contains a neural network trained to identify student names. This file is large and can take significant time to generate, but only needs to be generated once per class.\n - #usenamereader After its creation, the `.namereader` file can be used in step [2] for future student assignments to give an initial guess on written names.',
+    'training-data': '_(Optional)_ #namereader Handwriting samples for name recognition, kept by the app in a folder next to the class roster with one subfolder per student. Step [3] adds to it every time you Finish & Export: crops of the printed name line from each scan, plus crops from the handwritten name table if your assignment included one (see step [1]). Samples already stored for a student are skipped, so processing later batches of scans grows the folder instead of replacing it.',
+    'namereader': '_(Optional)_ #namereader Step [4] trains this file, a neural network that identifies student names, from the handwriting stored for a class. It is large and can take significant time to generate, but the app keeps it next to the class roster and only one is needed per class. Once handwriting has been added for new students, fine-tuning folds them in without starting over.\n - #usenamereader Step [2] can then guess written names for future assignments in that class.',
 };
 
 const WORKFLOW_BUTTON_TOOLTIPS = {
     1: 'Create or upload a master file (`.json`) that contains assignment information. From this, build randomized assignment `.pdf`s and supporting files.\n - #namereader When creating the assignment, you can include a question where students will hand-write their names multiple times to be used for identifying their names on future assignments.\nOptionally select a class so its roster (a `.csv` file) is bundled into the archive.\n - #canvas If the roster has an `ID` header, the final grades `.csv` export can be used to import those scores into Canvas.\n - #drive If the roster has an `Email` header, the feedback `.pdf`s can be exported to a per-student Google Drive folder (read-only) automatically shared with them.',
-    2: 'Read scanned pages, locate bubbles/anchors, and build a `.assn` file that is used for grading.\n - #usenamereader If a `.namereader` file is provided, student names are guessed from the name line and stored as `name_guesses.json` in the `.assn` file. These should be manually verified.',
-    3: 'Assign student names and enter/review grades for each question. Produce feedback files and score spreadsheets.',
-    4: '#namereader Create a name-reading neural network that idenifies student names to speed up name assignment in future assignments.',
+    2: 'Read scanned pages, locate bubbles/anchors, and build a `.assn` file that is used for grading.\n - #usenamereader With "Guess student names" checked, the name reader trained for this assignment\'s class guesses names from the name line and stores them as `name_guesses.json` in the `.assn` file. These should be manually verified.',
+    3: 'Assign student names and enter/review grades for each question. Produce feedback files and score spreadsheets.\n - #namereader Finish & Export also files this assignment\'s handwriting samples under the class, ready for step [4].',
+    4: '#namereader Train or fine-tune a name-reading neural network for a class, so names on future assignments can be guessed instead of typed.',
 };
 
 const WORKFLOW_TAG_REPLACEMENTS = {
@@ -248,11 +248,16 @@ function showSection(id) {
     if (id) {
         document.getElementById(id).classList.remove('hidden');
     }
-    if ((id === 'generate-sec' || id === 'process-sec') && typeof refreshClassSelect === 'function') {
+    const classSelectSections = ['generate-sec', 'process-sec', 'namereader-sec'];
+    if (classSelectSections.includes(id) && typeof refreshClassSelect === 'function') {
         refreshClassSelect().catch(() => {});
     }
     if (id === 'process-sec') {
         applyProcessModeDisabledState();
+        refreshProcArchiveInfo();
+    }
+    if (id === 'namereader-sec') {
+        refreshNameReaderClassInfo();
     }
 }
 
@@ -313,9 +318,6 @@ function pickFolder(inputId) {
 function useCurrentPickerFolder() {
     const dir = document.getElementById('file-picker-dir').textContent;
     document.getElementById(currentPickerInput).value = dir;
-    if (currentPickerInput === 'nr-handwriting-path') {
-        syncNameReaderNameFromPath();
-    }
     closeFilePicker();
 }
 
@@ -369,6 +371,7 @@ async function loadFilePickerDir(dir) {
                         } else if (currentPickerInput === 'proc-assnversions-path') {
                             syncProcessNameFromPath();
                             bustScanImageCache();
+                            refreshProcArchiveInfo();
                         } else if (currentPickerInput === 'proc-tiff-path') {
                             syncProcessNameFromTiff();
                             bustScanImageCache();
@@ -399,15 +402,6 @@ function stripExtension(fileName, extension) {
     }
     const dot = fileName.lastIndexOf('.');
     return dot > 0 ? fileName.slice(0, dot) : fileName;
-}
-
-function classStemFromTrainingDir(folderPath) {
-    const name = splitPath(folderPath).file || "";
-    const suffix = "_name_training_data";
-    if (name.toLowerCase().endsWith(suffix) && name.length > suffix.length) {
-        return name.slice(0, name.length - suffix.length);
-    }
-    return name;
 }
 
 function selectAllOnFirstClick(el) {
@@ -502,6 +496,7 @@ function applyProcessModeDisabledState() {
     setProcessControlsDisabled(document.getElementById('proc-namereader-row'), nonBiscuit);
     const fields = document.getElementById('proc-non-biscuit-fields');
     if (fields) fields.classList.toggle('hidden', !nonBiscuit);
+    applyProcNameReaderState();
 }
 
 function updateProcessModeUi() {
@@ -539,20 +534,95 @@ async function updateProcessNameStatus() {
     setNameFieldState(newNameInput, warning, exists, ".assn");
 }
 
-function syncNameReaderNameFromPath() {
-    const folder = document.getElementById('nr-handwriting-path').value;
-    document.getElementById('nr-output-name').value = classStemFromTrainingDir(folder);
-    updateNameReaderNameStatus();
+// Class + name-reader state for the .assnversions currently entered, so Process Scans knows
+// whether it can offer name guessing and whether the archive's roster has drifted.
+let procArchiveInfo = null;
+let procArchiveInfoSeq = 0;
+let procArchiveInfoTimer = null;
+
+// Typing a path a character at a time should not open the archive on every keystroke.
+function scheduleProcArchiveInfoRefresh() {
+    clearTimeout(procArchiveInfoTimer);
+    procArchiveInfoTimer = setTimeout(refreshProcArchiveInfo, 400);
 }
 
-async function updateNameReaderNameStatus() {
-    const folder = document.getElementById('nr-handwriting-path').value;
-    const newNameInput = document.getElementById('nr-output-name');
-    const warning = document.getElementById('nr-name-warning');
-    const parts = splitPath(folder);
-    const targetName = `${newNameInput.value.trim()}.namereader`;
-    const exists = await fileExistsInDir(parts.dir || ".", targetName);
-    setNameFieldState(newNameInput, warning, exists, ".namereader");
+async function refreshProcArchiveInfo() {
+    const path = document.getElementById('proc-assnversions-path').value.trim();
+    const seq = ++procArchiveInfoSeq;
+    procArchiveInfo = null;
+    if (!path) {
+        applyProcNameReaderState();
+        return;
+    }
+    let info = null;
+    try {
+        const res = await fetch('/api/archive_class_info', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ archive_file: path }),
+        });
+        const data = await res.json();
+        if (res.ok && data.status === 'success') info = data;
+    } catch (e) {
+        // Leave the checkbox disabled; the run itself will report a bad path.
+    }
+    if (seq !== procArchiveInfoSeq) return;
+    procArchiveInfo = info;
+    applyProcNameReaderState();
+}
+
+function applyProcNameReaderState() {
+    const checkbox = document.getElementById('proc-guess-names');
+    const status = document.getElementById('proc-namereader-status');
+    if (!checkbox || !status) return;
+    const nonBiscuit = isNonBiscuitMode();
+    const available = !nonBiscuit && !!procArchiveInfo && !!procArchiveInfo.has_namereader;
+    checkbox.disabled = !available;
+    if (!available) checkbox.checked = false;
+    if (nonBiscuit) {
+        status.textContent = '';
+    } else if (!procArchiveInfo) {
+        status.textContent = 'Choose a .assnversions file to see whether its class has a trained name reader.';
+    } else if (available) {
+        status.textContent = `Using the name reader trained for ${procArchiveInfo.class_name}.`;
+    } else if (procArchiveInfo.class_name) {
+        status.textContent = `${procArchiveInfo.class_name} has no name reader yet. Train one in step [4].`;
+    } else {
+        status.textContent = 'This assignment has no class roster, so names cannot be guessed.';
+    }
+}
+
+// Offer to replace an archive's roster with the app's copy of the same class. Returns false
+// only when the user asked for the update and it failed.
+async function offerArchiveRosterUpdate(archivePath, rosterStatus) {
+    if (!rosterStatus || !rosterStatus.differs || !rosterStatus.app_roster_exists) return true;
+    const counts = (Number.isFinite(rosterStatus.app_num_students) && Number.isFinite(rosterStatus.archive_num_students))
+        ? `\n\nIn the archive: ${rosterStatus.archive_num_students} student(s). In the app: ${rosterStatus.app_num_students}.`
+        : '';
+    const update = await showConfirmModal({
+        title: 'Roster Out Of Date',
+        message: `The class roster stored in this file differs from the app's roster for ${rosterStatus.class_name}.`
+            + `${counts}\n\nUpdate the file to use the app's roster?`,
+        confirmLabel: "Use App's Roster",
+        cancelLabel: 'Keep As Is',
+    });
+    if (!update) return true;
+    try {
+        const res = await fetch('/api/archive_apply_app_roster', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ archive_file: archivePath }),
+        });
+        const data = await res.json();
+        if (!res.ok || data.status !== 'success') throw new Error(data.message || 'Unknown error.');
+        return true;
+    } catch (e) {
+        showMessageModal({
+            title: 'Roster Not Updated',
+            message: e.message || String(e),
+        });
+        return false;
+    }
 }
 
 // Create Assignment
@@ -588,7 +658,7 @@ function generateAssnFiles() {
 
 // Process Scans Function
 
-function processScans() {
+async function processScans() {
     const tiffPath = document.getElementById('proc-tiff-path').value;
     const newFileName = document.getElementById('proc-new-name').value.trim();
     const nonBiscuit = isNonBiscuitMode();
@@ -619,8 +689,10 @@ function processScans() {
         payload.assn_type = document.getElementById('proc-assn-type').value;
         payload.class_name = classSelect ? classSelect.value.trim() : '';
     } else {
-        payload.assn_file = document.getElementById('proc-assnversions-path').value;
-        payload.namereader_file = document.getElementById('proc-namereader-path').value.trim();
+        const assnVersionsPath = document.getElementById('proc-assnversions-path').value;
+        payload.assn_file = assnVersionsPath;
+        payload.guess_names = !!document.getElementById('proc-guess-names').checked;
+        if (procArchiveInfo && !await offerArchiveRosterUpdate(assnVersionsPath, procArchiveInfo)) return;
     }
 
     out.textContent = "Running...\n";
@@ -655,11 +727,86 @@ let nrCanSave = false;
 let nrStopping = false;
 const NR_SAVE_TOP1 = 0.9;
 
+// Name data stored for the selected class, which decides whether Train or Fine-Tune is offered.
+let nrClassInfo = null;
+let nrClassInfoSeq = 0;
+
+async function refreshNameReaderClassInfo() {
+    const select = document.getElementById('nr-class-select');
+    const className = select ? select.value.trim() : '';
+    const seq = ++nrClassInfoSeq;
+    nrClassInfo = null;
+    if (!className) {
+        renderNameReaderClassStatus();
+        return;
+    }
+    try {
+        const res = await fetch(`/api/class_name_data?class_name=${encodeURIComponent(className)}`);
+        const data = await res.json();
+        if (seq !== nrClassInfoSeq) return;
+        if (res.ok && data.status === 'success') nrClassInfo = data;
+    } catch (e) {
+        // Falls through to the "could not read" message below.
+    }
+    if (seq !== nrClassInfoSeq) return;
+    renderNameReaderClassStatus();
+}
+
+function renderNameReaderClassStatus() {
+    const status = document.getElementById('nr-class-status');
+    const select = document.getElementById('nr-class-select');
+    if (!status) return;
+    const className = select ? select.value.trim() : '';
+    const info = nrClassInfo;
+
+    if (!className) {
+        status.textContent = 'Choose a class to see the handwriting Biscuit has collected for it.';
+    } else if (!info) {
+        status.textContent = `Could not read the stored name data for ${className}.`;
+    } else if (!info.num_students) {
+        status.textContent = `No handwriting stored for ${className} yet. Grade an assignment with a name line`
+            + ` or a handwritten name table, then run Finish & Export to collect some.`;
+    } else {
+        const lines = [
+            `${info.num_students} student(s): ${info.num_table_images} name-table crop(s),`
+            + ` ${info.num_assn_images} crop(s) taken off scanned name lines.`,
+        ];
+        if (info.has_namereader) {
+            const trained = info.trained_at ? ` (trained ${String(info.trained_at).replace('T', ' ').slice(0, 16)})` : '';
+            lines.push(`A name reader already exists for this class${trained}.`);
+            const newImages = (info.new_table_images || 0) + (info.new_assn_images || 0);
+            const newStudents = Array.isArray(info.new_students) ? info.new_students.length : 0;
+            lines.push(newImages
+                ? `${newImages} image(s) and ${newStudents} new student(s) have been added since then;`
+                    + ` fine-tuning folds them in without discarding what the model already learned.`
+                : 'Nothing new has been added since it was trained.');
+            lines.push('Training again replaces it, starting over from scratch.');
+        } else {
+            lines.push('No name reader for this class yet.');
+        }
+        status.textContent = lines.join(' ');
+    }
+    syncNameReaderButtons();
+}
+
+function syncNameReaderButtons() {
+    const trainBtn = document.getElementById('nr-train-btn');
+    const fineTuneBtn = document.getElementById('nr-finetune-btn');
+    const isTraining = !!activeTrainSocket;
+    const hasData = !!nrClassInfo && nrClassInfo.num_students > 0;
+    if (trainBtn) {
+        trainBtn.disabled = isTraining || !hasData;
+        trainBtn.textContent = (nrClassInfo && nrClassInfo.has_namereader) ? 'Retrain From Scratch' : 'Train';
+    }
+    if (fineTuneBtn) {
+        fineTuneBtn.disabled = isTraining || !hasData || !nrClassInfo.has_namereader;
+    }
+}
+
 function setNameReaderTrainingUi(isTraining, isStopping) {
     nrStopping = !!isStopping;
-    const trainBtn = document.getElementById('nr-train-btn');
     const stopBtn = document.getElementById('nr-stop-btn');
-    if (trainBtn) trainBtn.disabled = !!isTraining;
+    syncNameReaderButtons();
     if (!stopBtn) return;
     stopBtn.disabled = !isTraining || nrStopping;
     if (nrStopping) {
@@ -692,18 +839,21 @@ function stopNameReaderTraining() {
     }
 }
 
-function trainNameReader() {
-    const handwritingDir = document.getElementById('nr-handwriting-path').value.trim();
-    const newFileName = document.getElementById('nr-output-name').value.trim();
+function trainNameReader(fineTune) {
+    const className = document.getElementById('nr-class-select').value.trim();
     const out = document.getElementById('nr-output');
+    if (!className) {
+        showMessageModal({ title: 'No Class Selected', message: 'Choose the class to train a name reader for.' });
+        return;
+    }
     out.textContent = "Running...\n";
     nrCanSave = false;
-    setNameReaderTrainingUi(true, false);
     const ws = new WebSocket(`ws://${location.host}/api/ws_train_namereader`);
     activeTrainSocket = ws;
+    setNameReaderTrainingUi(true, false);
     ws.onopen = () => ws.send(JSON.stringify({
-        handwriting_dir: handwritingDir,
-        new_file_name: newFileName,
+        class_name: className,
+        fine_tune: !!fineTune,
     }));
     ws.onmessage = (event) => {
         out.textContent += event.data;
@@ -722,12 +872,12 @@ function trainNameReader() {
         if (activeTrainSocket === ws) activeTrainSocket = null;
         nrCanSave = false;
         setNameReaderTrainingUi(false, false);
+        refreshNameReaderClassInfo();
     };
 }
 
 selectAllOnFirstClick(document.getElementById('gen-new-name'));
 selectAllOnFirstClick(document.getElementById('proc-new-name'));
-selectAllOnFirstClick(document.getElementById('nr-output-name'));
 
 let masterValidationDebounceTimer = null;
 let masterValidationSeq = 0;

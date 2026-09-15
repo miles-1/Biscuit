@@ -329,7 +329,7 @@ async function finalizeScans() {
         assn_file: assnPath,
         new_file_name: newName,
         corrections: verifyCorrections,
-        namereader_file: document.getElementById('proc-namereader-path').value.trim()
+        guess_names: !!document.getElementById('proc-guess-names').checked
     }));
     
     let fullOutput = "";

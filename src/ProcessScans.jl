@@ -6,9 +6,11 @@ using JSON
 using ..ArchiveUtils
 using ..Dmtx: decode_matrix
 using ..NameReader: load_name_reader, guess_assignment_names
+using ..NameStore: NameImageCandidate, merge_name_images!
 using ..Classes: read_roster_table
 
 export process_scans, process_non_biscuit_scans, export_name_training_data, extract_name_field_crops
+export snapshot_name_crops, name_crops_dir
 
 const Points2F64 = Vector{NTuple{2,Float64}}
 const pdf_width = 612
@@ -29,14 +31,18 @@ function perspective_transform_points(points, H)::Points2F64
     return out
 end
 
-# Load each TIFF page as grayscale, then Otsu-binarize to pure black/white (ink=0, paper=255).
-# Accepts color, grayscale, or already-binary scans.
-function load_binary_pages(tiff_path::String)
+# Load each TIFF page as grayscale. Accepts color, grayscale, or already-binary scans.
+function load_gray_pages(tiff_path::String)
     ret, pages = cv.imreadmulti(tiff_path; flags=cv.IMREAD_GRAYSCALE)
     if !ret
         error("Could not load TIFF file at $tiff_path")
     end
-    return map(pages) do image_3d
+    return pages
+end
+
+# Otsu-binarize grayscale pages to pure black/white (ink=0, paper=255).
+function load_binary_pages(tiff_path::String)
+    return map(load_gray_pages(tiff_path)) do image_3d
         _, binary = cv.threshold(image_3d, 0.0, 255.0, cv.THRESH_BINARY | cv.THRESH_OTSU)
         binary
     end
@@ -768,11 +774,6 @@ const NAME_BOX_WARP_HEIGHT = 99
 const NAME_FIELD_WARP_WIDTH = 550
 const NAME_FIELD_WARP_HEIGHT = 151
 
-# Same rule as feedback.typ / GoogleDrive.sanitize_student_name.
-function _sanitize_training_student_name(name::AbstractString)::String
-    return lowercase(replace(String(name), ", " => "_"))
-end
-
 function _corner_xy(point)::NTuple{2, Float64}
     if point isa AbstractVector && length(point) >= 2
         return (Float64(point[1]), Float64(point[2]))
@@ -801,36 +802,124 @@ function warp_name_box_crop(
     return cv.warpPerspective(image, M, cv.Size{Int32}(Int32(width), Int32(height)))
 end
 
-"""
-If any assignment in `processed_assn_data` has `name_box_corners`, write
-`[class_name]_name_training_data/` next to the `.assn` with per-student folders of
-warped 200×40 name-box crops from the annotated scans.
+const NAME_CROPS_DIRNAME = "name_crops"
+const NAME_TABLE_CROPS_SUBDIR = "table"
+const NAME_FIELD_CROPS_SUBDIR = "field"
 
-Returns the output directory, or `nothing` when there is nothing to export.
-`class_name` falls back to the archive stem when not provided.
+name_crops_dir(archive_dir::AbstractString)::String = joinpath(String(archive_dir), NAME_CROPS_DIRNAME)
+
+function _name_corner_group(entry, key::AbstractString)
+    isa(entry, AbstractDict) || return nothing
+    group = get(entry, key, nothing)
+    isa(group, AbstractDict) || return nothing
+    haskey(group, "page") && haskey(group, "positions") || return nothing
+    positions = group["positions"]
+    isa(positions, AbstractVector) || return nothing
+    (isempty(positions) || length(positions) % 4 != 0) && return nothing
+    return (page=Int64(group["page"]), positions=positions)
+end
+
 """
-function export_name_training_data(;
-    processed_assn_data_file::String,
-    grading_data_file::String,
-    annotated_scan_folder::String,
-    archive_path::String,
-    class_name::Union{Nothing, AbstractString}=nothing,
+    snapshot_name_crops(; tiff_path, processed_assn_data, ppage_dict, archive_dir)
+
+Cut the handwritten name-table boxes and the printed name line out of the raw
+scans and store them, unlabeled, in the archive under `name_crops/`.
+
+This happens during processing rather than at export for two reasons. The
+annotated scans grading works from have marks drawn on them, which is not what
+the name reader sees when it reads a name. And the pages used for detection have
+been Otsu-binarized, which throws away the grayscale that lets training vary its
+black-and-white threshold.
+
+Which student each crop belongs to is only settled once grading finishes, so the
+file names here are assignment ids. Returns the folder, or `nothing` when the
+assignment has no name marks at all.
+"""
+function snapshot_name_crops(;
+    tiff_path::String,
+    processed_assn_data::Dict{Int64, Dict{String, Any}},
+    ppage_dict::Dict{Int64, NTuple{2, Int64}},
+    archive_dir::String,
 )::Union{String, Nothing}
-    @assert isfile(processed_assn_data_file) "Missing processed_assn_data.json: $processed_assn_data_file"
-    @assert isfile(grading_data_file) "Missing grading_data.json: $grading_data_file"
-    @assert isdir(annotated_scan_folder) "Missing annotated scan folder: $annotated_scan_folder"
+    wanted = NamedTuple[]
+    for assn_id in sort!(collect(keys(processed_assn_data)))
+        entry = processed_assn_data[assn_id]
+        table = _name_corner_group(entry, "name_box_corners")
+        field = _name_corner_group(entry, "name_field_corners")
+        (table === nothing && field === nothing) && continue
+        push!(wanted, (; assn_id, table, field))
+    end
+    isempty(wanted) && return nothing
 
-    processed = JSON.parsefile(processed_assn_data_file)
-    has_name_boxes = any(
-        entry -> isa(entry, AbstractDict) && haskey(entry, "name_box_corners"),
-        values(processed),
-    )
-    has_name_boxes || return nothing
+    output_dir = name_crops_dir(archive_dir)
+    rm(output_dir; recursive=true, force=true)
+    mkpath(joinpath(output_dir, NAME_TABLE_CROPS_SUBDIR))
+    mkpath(joinpath(output_dir, NAME_FIELD_CROPS_SUBDIR))
 
-    grading = JSON.parsefile(grading_data_file)
+    ppage_of = Dict((assn_id, page) => ppage for (ppage, (assn_id, page)) in pairs(ppage_dict))
+    printstyled("Saving Name Crops\n"; bold=true, underline=true)
+    pages = load_gray_pages(tiff_path)
+    n_table = 0
+    n_field = 0
+
+    for item in wanted
+        for (group, subdir) in ((item.table, NAME_TABLE_CROPS_SUBDIR), (item.field, NAME_FIELD_CROPS_SUBDIR))
+            group === nothing && continue
+            ppage = get(ppage_of, (item.assn_id, group.page), nothing)
+            (ppage === nothing || ppage < 1 || ppage > length(pages)) && continue
+            page_image = pages[ppage]
+            is_table = subdir == NAME_TABLE_CROPS_SUBDIR
+            width = is_table ? NAME_BOX_WARP_WIDTH : NAME_FIELD_WARP_WIDTH
+            height = is_table ? NAME_BOX_WARP_HEIGHT : NAME_FIELD_WARP_HEIGHT
+            n_boxes = length(group.positions) ÷ 4
+            for box in 1:n_boxes
+                warped = warp_name_box_crop(page_image, group.positions[(4box - 3):(4box)]; width, height)
+                out_path = if is_table
+                    box_dir = joinpath(output_dir, subdir, string(item.assn_id))
+                    mkpath(box_dir)
+                    joinpath(box_dir, string(lpad(box, 2, '0'), ".png"))
+                else
+                    joinpath(output_dir, subdir, string(item.assn_id, ".png"))
+                end
+                cv.imwrite(out_path, warped)
+                is_table ? (n_table += 1) : (n_field += 1)
+            end
+        end
+    end
+
+    println("Saved $n_table name-table crop(s) and $n_field name-line crop(s) to the archive.")
+    return output_dir
+end
+
+# Crops of a student's name from a single assignment, as candidates for the class store.
+function _name_crop_candidates_for_assn(
+    crops_dir::AbstractString,
+    assn_id::Integer,
+    student::AbstractString,
+)::Vector{NameImageCandidate}
+    candidates = NameImageCandidate[]
+    table_dir = joinpath(crops_dir, NAME_TABLE_CROPS_SUBDIR, string(assn_id))
+    if isdir(table_dir)
+        for file in sort(readdir(table_dir))
+            endswith(lowercase(file), ".png") || continue
+            push!(candidates, NameImageCandidate(String(student), :table, joinpath(table_dir, file)))
+        end
+    end
+    field_path = joinpath(crops_dir, NAME_FIELD_CROPS_SUBDIR, string(assn_id, ".png"))
+    isfile(field_path) && push!(candidates, NameImageCandidate(String(student), :assn, field_path))
+    return candidates
+end
+
+# Archives processed before name crops were snapshotted have no `name_crops/`, so fall back
+# to cutting the name table out of the annotated scans, which is what used to happen.
+function _legacy_name_table_candidates(
+    processed::AbstractDict,
+    grading::AbstractDict,
+    annotated_scan_folder::AbstractString,
+    scratch_dir::AbstractString,
+)::Vector{NameImageCandidate}
     scan_results_path = joinpath(annotated_scan_folder, "scan_results.json")
     scan_results = isfile(scan_results_path) ? JSON.parsefile(scan_results_path) : Any[]
-
     page_image = Dict{Tuple{Int64, Int64}, String}()
     for res in scan_results
         isa(res, AbstractDict) || continue
@@ -839,78 +928,102 @@ function export_name_training_data(;
         page_image[(Int64(res["assn_id"]), Int64(res["page"]))] = String(res["image_path"])
     end
 
-    cname = if class_name !== nothing && !isempty(strip(String(class_name)))
-        strip(String(class_name))
-    else
-        first(splitext(basename(archive_path)))
-    end
-    output_dir = joinpath(dirname(abspath(archive_path)), "$(cname)_name_training_data")
-    if isdir(output_dir)
-        rm(output_dir; recursive=true)
-        println("The folder $output_dir already existed, so it was deleted.")
-    end
-    mkdir(output_dir)
-
+    candidates = NameImageCandidate[]
     page_cache = Dict{String, Any}()
-    n_students = 0
-    n_crops = 0
+    for assn_id in _processed_assn_ids(processed)
+        table = _name_corner_group(_processed_assn_entry(processed, assn_id), "name_box_corners")
+        table === nothing && continue
+        student = _graded_student_name(grading, assn_id)
+        student === nothing && continue
 
-    for assn_id_str in sort!(collect(keys(processed)); by=string)
-        entry = processed[assn_id_str]
-        isa(entry, AbstractDict) || continue
-        haskey(entry, "name_box_corners") || continue
-        nbc = entry["name_box_corners"]
-        isa(nbc, AbstractDict) || continue
-        haskey(nbc, "page") && haskey(nbc, "positions") || continue
-
-        assn_id = tryparse(Int64, string(assn_id_str))
-        assn_id === nothing && continue
-        gentry = get(grading, string(assn_id), nothing)
-        isa(gentry, AbstractDict) || continue
-        name = get(gentry, "name", nothing)
-        (isa(name, AbstractString) && !isempty(strip(name))) || continue
-
-        page = Int64(nbc["page"])
-        positions = nbc["positions"]
-        isa(positions, AbstractVector) || continue
-        isempty(positions) && continue
-        length(positions) % 4 == 0 || throw(ArgumentError(
-            "name_box_corners.positions length must be divisible by 4 for assn $assn_id; got $(length(positions))"
-        ))
-
-        img_rel = get(page_image, (assn_id, page), nothing)
-        if img_rel === nothing
-            img_rel = joinpath("assn_$assn_id", string(lpad(page, 4, '0'), ".png"))
+        img_rel = get(page_image, (assn_id, table.page)) do
+            joinpath("assn_$assn_id", string(lpad(table.page, 4, '0'), ".png"))
         end
         img_path = joinpath(annotated_scan_folder, img_rel)
-        isfile(img_path) || throw(ArgumentError("Annotated scan not found for assn $assn_id page $page: $img_path"))
+        isfile(img_path) || continue
+        image = get!(() -> cv.imread(img_path), page_cache, img_path)
 
-        image = get!(page_cache, img_path) do
-            cv.imread(img_path)
-        end
-
-        student_dir = joinpath(output_dir, _sanitize_training_student_name(name))
-        mkpath(student_dir)
-
-        n_boxes = length(positions) ÷ 4
-        for i in 1:n_boxes
-            chunk = positions[(4i - 3):(4i)]
-            warped = warp_name_box_crop(image, chunk)
-            out_path = joinpath(student_dir, string(lpad(i, 2, '0'), ".png"))
+        assn_dir = joinpath(scratch_dir, string(assn_id))
+        mkpath(assn_dir)
+        for box in 1:(length(table.positions) ÷ 4)
+            warped = warp_name_box_crop(image, table.positions[(4box - 3):(4box)])
+            out_path = joinpath(assn_dir, string(lpad(box, 2, '0'), ".png"))
             cv.imwrite(out_path, warped)
-            n_crops += 1
+            push!(candidates, NameImageCandidate(student, :table, out_path))
         end
-        n_students += 1
+    end
+    return candidates
+end
+
+function _graded_student_name(grading::AbstractDict, assn_id::Integer)::Union{Nothing, String}
+    entry = get(grading, string(assn_id), nothing)
+    isa(entry, AbstractDict) || return nothing
+    name = get(entry, "name", nothing)
+    (isa(name, AbstractString) && !isempty(strip(name))) || return nothing
+    return String(strip(name))
+end
+
+"""
+    export_name_training_data(; processed_assn_data_file, grading_data_file, archive_dir, class_name, ...)
+
+Label the archive's name crops with the student names grading settled on and merge
+them into `class_name`'s app-managed store. Crops whose pixels are already stored
+for that student are skipped, so re-exporting, or processing a later batch of the
+same assignment, adds only what is new.
+
+Returns `(; images_dir, added, skipped, students)`, or `nothing` when the
+assignment carries no name marks.
+"""
+function export_name_training_data(;
+    processed_assn_data_file::String,
+    grading_data_file::String,
+    archive_dir::String,
+    class_name::AbstractString,
+    annotated_scan_folder::Union{Nothing, AbstractString}=nothing,
+)
+    @assert isfile(processed_assn_data_file) "Missing processed_assn_data.json: $processed_assn_data_file"
+    @assert isfile(grading_data_file) "Missing grading_data.json: $grading_data_file"
+    isempty(strip(String(class_name))) && throw(ArgumentError("`class_name` is required to store name training data."))
+
+    processed = JSON.parsefile(processed_assn_data_file)
+    grading = JSON.parsefile(grading_data_file)
+    crops_dir = name_crops_dir(archive_dir)
+
+    if isdir(crops_dir)
+        candidates = NameImageCandidate[]
+        for assn_id in _processed_assn_ids(processed)
+            student = _graded_student_name(grading, assn_id)
+            student === nothing && continue
+            append!(candidates, _name_crop_candidates_for_assn(crops_dir, assn_id, student))
+        end
+        return _merge_and_report(class_name, candidates)
     end
 
-    if n_students == 0
-        rm(output_dir; recursive=true, force=true)
-        println("No named students with name_box_corners; skipped name training data export.")
-        return nothing
+    has_name_table = any(
+        assn_id -> _name_corner_group(_processed_assn_entry(processed, assn_id), "name_box_corners") !== nothing,
+        _processed_assn_ids(processed),
+    )
+    has_name_table || return nothing
+    annotated_scan_folder === nothing && return nothing
+    isdir(annotated_scan_folder) || return nothing
+    println("This archive predates saved name crops; cutting the name table from the annotated scans instead.")
+    return mktempdir() do scratch
+        _merge_and_report(
+            class_name,
+            _legacy_name_table_candidates(processed, grading, annotated_scan_folder, scratch),
+        )
     end
+end
 
-    println("Created: $output_dir ($n_students student folder(s), $n_crops name-box image(s))")
-    return output_dir
+function _merge_and_report(class_name::AbstractString, candidates::Vector{NameImageCandidate})
+    isempty(candidates) && return nothing
+    result = merge_name_images!(class_name, candidates)
+    println(
+        "Name training data for $(class_name): added $(result.added) image(s) across ",
+        "$(result.students) student(s), skipped $(result.skipped) already stored.",
+    )
+    println("Stored in: $(result.images_dir)")
+    return result
 end
 
 function process_scans(
@@ -938,6 +1051,8 @@ function process_scans(
         mapped_data = get_mapped_data(; tiff_data, page_elements_data)
         assn_data = get_question_info_by_assn(tiff_path; mapped_data, page_elements_data, ppage_dict)
         processed_assn_data = process_assn_data(assn_data; mapped_data, output_dir=archive_dir)
+        # Snapshot before annotation: the marks drawn below would otherwise land in the crops.
+        snapshot_name_crops(; tiff_path, processed_assn_data, ppage_dict, archive_dir)
         if namereader_file !== nothing && !isempty(strip(String(namereader_file)))
             apply_name_reader_guesses!(
                 processed_assn_data;

@@ -473,7 +473,7 @@ end
 
 Return the label encoded in `path`. Prefers the `label-001.png` filename
 convention; otherwise uses the parent directory name, which is the layout of
-`practice/EvolutionFa26_name_training_data`.
+a class's stored handwriting folder (see `NameStore`).
 """
 function label_from_tile_path(path::AbstractString)
     from_name = label_from_filename(path)

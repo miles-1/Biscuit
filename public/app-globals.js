@@ -115,8 +115,37 @@ function showMessageModal({ title = 'Notice', message = '', okLabel = 'OK' } = {
     const okBtn = document.getElementById('message-modal-ok');
     okBtn.textContent = okLabel;
     okBtn.onclick = closeMessageModal;
+    document.getElementById('message-modal-cancel').classList.add('hidden');
     document.getElementById('message-modal-close').onclick = closeMessageModal;
     modal.classList.remove('hidden');
+}
+
+// Same modal with a second button; resolves true when the user confirms.
+function showConfirmModal({ title = 'Confirm', message = '', confirmLabel = 'OK', cancelLabel = 'Cancel' } = {}) {
+    const modal = document.getElementById('message-modal');
+    if (!modal) return Promise.resolve(false);
+    document.getElementById('message-modal-title').textContent = title;
+    document.getElementById('message-modal-body').textContent = message;
+    const okBtn = document.getElementById('message-modal-ok');
+    const cancelBtn = document.getElementById('message-modal-cancel');
+    const closeBtn = document.getElementById('message-modal-close');
+    okBtn.textContent = confirmLabel;
+    cancelBtn.textContent = cancelLabel;
+    cancelBtn.classList.remove('hidden');
+    modal.classList.remove('hidden');
+    return new Promise((resolve) => {
+        const settle = (answer) => {
+            closeMessageModal();
+            cancelBtn.classList.add('hidden');
+            okBtn.onclick = closeMessageModal;
+            cancelBtn.onclick = null;
+            closeBtn.onclick = closeMessageModal;
+            resolve(answer);
+        };
+        okBtn.onclick = () => settle(true);
+        cancelBtn.onclick = () => settle(false);
+        closeBtn.onclick = () => settle(false);
+    });
 }
 
 function closeVerifyPrompt() {

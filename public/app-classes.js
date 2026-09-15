@@ -114,7 +114,7 @@ async function refreshClassesUi() {
     }
 }
 
-const CLASS_SELECT_IDS = ['gen-class-select', 'proc-class-select'];
+const CLASS_SELECT_IDS = ['gen-class-select', 'proc-class-select', 'nr-class-select'];
 
 function classSelectElements() {
     return CLASS_SELECT_IDS.map((id) => document.getElementById(id)).filter(Boolean);

@@ -150,6 +150,125 @@ function roster_class_name_from_path(csv_path::AbstractString)::String
     return first(splitext(basename(csv_path)))
 end
 
+function _required_class_name(value)::String
+    name = _optional_path(value)
+    name === nothing && throw(ArgumentError("`class_name` is required."))
+    isfile(class_csv_path(name)) || throw(ArgumentError("No class named $(repr(name)) is registered."))
+    return name
+end
+
+# Fresh training runs get the full schedule; a fine-tune starts from weights that already
+# work, so it only needs enough epochs to absorb the new samples.
+const TRAIN_EPOCHS = 40
+const FINE_TUNE_EPOCHS = 15
+
+"""
+Compare rosters by their parsed rows rather than their bytes, so a re-export with
+different column order, quoting, or line endings does not read as a change.
+"""
+function _roster_signature(csv_path::AbstractString)::Union{Nothing, Vector{NTuple{4, String}}}
+    table = try
+        read_roster_table(csv_path)
+    catch
+        return nothing
+    end
+    cell(column, index) = begin
+        haskey(table, column) || return ""
+        value = getproperty(table, column)[index]
+        (ismissing(value) || value === nothing) ? "" : strip(string(value))
+    end
+    return [
+        (cell(:Student, i), cell(:ID, i), cell(:Section, i), cell(:Email, i))
+        for i in eachindex(table.Student)
+    ]
+end
+
+"""
+    roster_sync_status(archive_csv_path)
+
+Whether the roster inside an archive still matches the app's class of the same
+name. `differs` is only meaningful when `app_roster_exists` and both files parse.
+"""
+function roster_sync_status(archive_csv_path::Union{Nothing, AbstractString})::Dict{String, Any}
+    if archive_csv_path === nothing
+        return Dict{String, Any}("class_name" => nothing, "app_roster_exists" => false, "differs" => false)
+    end
+    class_name = roster_class_name_from_path(archive_csv_path)
+    app_csv = try
+        class_csv_path(class_name)
+    catch
+        return Dict{String, Any}("class_name" => class_name, "app_roster_exists" => false, "differs" => false)
+    end
+    if !isfile(app_csv)
+        return Dict{String, Any}("class_name" => class_name, "app_roster_exists" => false, "differs" => false)
+    end
+    archive_rows = _roster_signature(archive_csv_path)
+    app_rows = _roster_signature(app_csv)
+    differs = archive_rows === nothing || app_rows === nothing ?
+        read(archive_csv_path, String) != read(app_csv, String) :
+        archive_rows != app_rows
+    return Dict{String, Any}(
+        "class_name" => class_name,
+        "app_roster_exists" => true,
+        "app_roster_path" => app_csv,
+        "archive_roster_path" => String(archive_csv_path),
+        "differs" => differs,
+        "app_num_students" => app_rows === nothing ? nothing : length(app_rows),
+        "archive_num_students" => archive_rows === nothing ? nothing : length(archive_rows),
+    )
+end
+
+"""
+The archive's single top-level roster CSV entry name, or `nothing` when there is
+not exactly one.
+"""
+function archive_roster_entry_name(archive_path::AbstractString)::Union{Nothing, String}
+    entries = try
+        archive_entry_names(archive_path)
+    catch
+        return nothing
+    end
+    csvs = sort(filter(entries) do name
+        endswith(lowercase(name), ".csv") && !occursin('/', name) && !startswith(name, ".")
+    end)
+    return length(csvs) == 1 ? csvs[1] : nothing
+end
+
+"""
+    archive_roster_status(archive_path)
+
+`roster_sync_status` for an `.assn` / `.assnversions` file, reading just the
+roster entry out of the archive rather than unpacking all of it.
+"""
+function archive_roster_status(archive_path::AbstractString)::Dict{String, Any}
+    entry = archive_roster_entry_name(archive_path)
+    entry === nothing &&
+        return Dict{String, Any}("class_name" => nothing, "app_roster_exists" => false, "differs" => false)
+    return mktempdir() do dir
+        dest = joinpath(dir, basename(entry))
+        extract_archive_entry(archive_path, entry, dest) === nothing &&
+            return Dict{String, Any}("class_name" => nothing, "app_roster_exists" => false, "differs" => false)
+        status = roster_sync_status(dest)
+        status["archive_roster_path"] = String(archive_path)
+        return status
+    end
+end
+
+"""
+Copy the app's class roster over the one in an unpacked archive directory, keeping
+the archive's file name so the archive never ends up with two rosters.
+"""
+function apply_app_roster_to_dir(archive_dir::AbstractString)::Dict{String, Any}
+    archive_csv = find_roster_csv_path(archive_dir)
+    archive_csv === nothing && throw(ArgumentError("This archive has no class roster CSV to update."))
+    status = roster_sync_status(archive_csv)
+    status["app_roster_exists"] || throw(ArgumentError(
+        "No class named $(repr(status["class_name"])) is registered in the app."
+    ))
+    cp(status["app_roster_path"], archive_csv; force=true)
+    return status
+end
+
 function _read_roster_from_temp(; give_default::Bool=false)
     temp_dir = STATE["temp_archive_dir"]
     @assert !isnothing(temp_dir) "Temp archive directory not initialized"

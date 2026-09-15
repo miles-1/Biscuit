@@ -102,17 +102,52 @@ function compose_name_training_image(
     )
 end
 
+"""
+    compose_assignment_training_image(name_field; kwargs...)
+
+Build one training sample from a crop taken straight off a scanned name line.
+
+Unlike `compose_name_training_image`, the ink already sits on its own real paper,
+so there is no background to overlay and no affine jitter to add: doing either
+would move the handwriting off the printed line it was written on. Only the two
+steps that model scanner variation are kept — black dot noise and a random
+threshold — followed by the same morphology and thinning.
+
+Affine keywords are accepted and ignored so one keyword set can drive both
+composers.
+"""
+function compose_assignment_training_image(
+    name_field;
+    target_size::Tuple{Int,Int}=NAME_FIELD_SIZE,
+    noise_max_percent::Real=0.012,
+    threshold_bounds=(0.62, 0.82),
+    morphology_radius::Integer=1,
+    isolated_pixel_radius::Integer=1,
+    rng::AbstractRNG=Random.default_rng(),
+    kwargs...,
+)
+    gray = fit_to_name_canvas(grayscale_float_image(name_field), target_size; align=:center)
+    noisy = apply_black_dot_noise(gray; noise_max_percent, rng)
+    threshold = sample_threshold(rng, threshold_bounds, noisy)
+    return thin_image_from_mask(
+        noisy .< threshold;
+        morphology_radius,
+        isolated_pixel_radius,
+    )
+end
+
 function thin_image_from_mask(
     foreground::AbstractMatrix{Bool};
     morphology_radius::Integer=1,
     isolated_pixel_radius::Integer=1,
 )
-    cleaned = remove_isolated_foreground(foreground; radius=isolated_pixel_radius)
-    cleaned = close_foreground(cleaned; radius=morphology_radius)
-    thinned = thinning(cleaned)
-    return map(thinned) do is_foreground
-        Gray{Float32}(is_foreground ? 0.0f0 : 1.0f0)
-    end
+    black_on_white = map(is_foreground -> Gray{Float32}(is_foreground ? 0.0f0 : 1.0f0), foreground)
+    return thin_image(
+        black_on_white;
+        threshold=0.5,
+        morphology_radius,
+        isolated_pixel_radius,
+    )
 end
 
 """

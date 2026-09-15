@@ -105,11 +105,21 @@ end
                     class_csv_file=class_csv_file,
                 )
             else
+                # Name guessing uses the class's app-managed name reader, resolved from the
+                # roster inside the archive, so the user never picks a file.
+                namereader_file = nothing
+                if get(data, "guess_names", false) === true
+                    status = archive_roster_status(assn_versions_file)
+                    namereader_file = class_namereader_for_guessing(get(status, "class_name", nothing))
+                    namereader_file === nothing && println(
+                        "Skipping name guesses: no trained name reader for this assignment's class."
+                    )
+                end
                 process_scans(
                     tiff_file;
                     assn_versions_file=assn_versions_file,
                     corrections=corrections,
-                    namereader_file=_optional_path(get(data, "namereader_file", nothing)),
+                    namereader_file=namereader_file,
                     output_name=_optional_path(get(data, "new_file_name", nothing)),
                 )
             end
@@ -166,20 +176,34 @@ end
 
             train_task = @async begin
                 try
-                    handwriting_dir = _optional_path(get(data, "handwriting_dir", nothing))
+                    class_name = _required_class_name(get(data, "class_name", nothing))
+                    fine_tune = get(data, "fine_tune", false) === true
+                    handwriting_dir = class_name_images_dir(class_name)
+                    isdir(handwriting_dir) || throw(ArgumentError(
+                        "No stored handwriting for $(class_name) yet. Grade an assignment with a " *
+                        "name line or name table and run Finish & Export to collect some."
+                    ))
+                    dest = class_namereader_path(class_name)
+                    sidecar = class_namereader_sidecar_path(class_name)
                     background_dir = _optional_path(get(data, "background_dir", nothing))
-                    if handwriting_dir === nothing || !isdir(handwriting_dir)
-                        throw(ArgumentError("handwriting_dir must be an existing folder of per-student name crops"))
-                    end
-                    output_name = _optional_path(get(data, "new_file_name", nothing))
-                    stem = if output_name !== nothing
-                        first(splitext(basename(output_name)))
-                    else
-                        NameReader.class_stem_from_training_dir(handwriting_dir)
-                    end
-                    dest = joinpath(dirname(abspath(handwriting_dir)), stem * ".namereader")
                     bg = background_dir === nothing ? NameReader.background_training_dir() : background_dir
-                    println("Training NameReader")
+
+                    init_model = nothing
+                    previous_split = nothing
+                    if fine_tune
+                        isfile(dest) || throw(ArgumentError(
+                            "There is no name reader for $(class_name) to fine-tune yet; train one first."
+                        ))
+                        init_model = load_name_reader(dest).gallery.model
+                        sidecar_data = NameReader.read_training_sidecar(sidecar)
+                        if sidecar_data !== nothing
+                            recorded = get(sidecar_data, "students", nothing)
+                            isa(recorded, AbstractDict) && (previous_split = recorded)
+                        end
+                    end
+
+                    println(fine_tune ? "Fine-tuning NameReader" : "Training NameReader")
+                    println("  class: ", class_name)
                     println("  handwriting: ", handwriting_dir)
                     println("  backgrounds: ", bg)
                     println("  output: ", dest)
@@ -187,6 +211,10 @@ end
                         handwriting_dir;
                         background_dir=bg,
                         output_path=dest,
+                        sidecar_path=sidecar,
+                        init_model=init_model,
+                        previous_split=previous_split,
+                        epochs=fine_tune ? FINE_TUNE_EPOCHS : TRAIN_EPOCHS,
                         should_stop=() -> stop_flag[],
                         save_on_stop=() -> save_on_stop[],
                     )
@@ -290,7 +318,12 @@ end
     catch e
         return Dict("status" => "error", "message" => "Could not build grading data: $e")
     end
-    return Dict("status" => "success", "grading_data" => grading_data)
+    roster_status = try
+        roster_sync_status(find_roster_csv_path(String(STATE["temp_archive_dir"])))
+    catch
+        nothing
+    end
+    return Dict("status" => "success", "grading_data" => grading_data, "roster_status" => roster_status)
 end
 
 @get "/api/get_students" function(req::HTTP.Request)
@@ -588,7 +621,8 @@ end
     end
 end
 
-# Crop mapped name boxes from annotated scans into [class]_name_training_data next to the .assn.
+# Label the archive's saved name crops with the names grading settled on, then merge them
+# into the class's app-managed training store.
 @post "/api/export_name_training_data" function(req::HTTP.Request)
     temp_dir = STATE["temp_archive_dir"]
     archive_path = STATE["assn_archive_path"]
@@ -597,40 +631,135 @@ end
     end
     processed_file = joinpath(temp_dir, "processed_assn_data.json")
     grading_data_file = joinpath(temp_dir, "grading_data.json")
-    annotated_scan_folder = joinpath(temp_dir, "annotated")
     if !isfile(processed_file)
         return Dict("status" => "error", "message" => "Missing processed_assn_data.json.")
     end
     if !isfile(grading_data_file)
         return Dict("status" => "error", "message" => "Missing grading_data.json; save grading work first.")
     end
-    if !isdir(annotated_scan_folder)
-        return Dict("status" => "error", "message" => "Missing annotated scans folder.")
-    end
     class_name = nothing
     try
         roster = _read_roster_from_temp(; give_default=true)
-        if roster !== nothing
-            class_name = roster.class_name
-        end
+        roster === nothing || (class_name = roster.class_name)
     catch
-        # Fall back to archive stem inside export_name_training_data.
+        # Handled as a missing class name below.
     end
+    if class_name === nothing
+        return Dict(
+            "status" => "error",
+            "message" => "This archive has no class roster CSV, so name training data has nowhere to go.",
+        )
+    end
+    annotated_scan_folder = joinpath(temp_dir, "annotated")
     try
-        output_dir = export_name_training_data(;
+        result = export_name_training_data(;
             processed_assn_data_file=processed_file,
             grading_data_file=grading_data_file,
-            annotated_scan_folder=annotated_scan_folder,
-            archive_path=String(archive_path),
+            archive_dir=String(temp_dir),
             class_name=class_name,
+            annotated_scan_folder=isdir(annotated_scan_folder) ? annotated_scan_folder : nothing,
         )
+        result === nothing && return Dict("status" => "success", "exported" => false)
         return Dict(
             "status" => "success",
-            "output_dir" => output_dir,
-            "exported" => output_dir !== nothing,
+            "exported" => result.added > 0,
+            "class_name" => class_name,
+            "output_dir" => result.images_dir,
+            "added" => result.added,
+            "skipped" => result.skipped,
+            "students" => result.students,
+            "class_registered" => isfile(class_csv_path(class_name)),
         )
     catch e
-        return Dict("status" => "error", "message" => "Failed to export name training data: $e")
+        return Dict("status" => "error", "message" => "Failed to store name training data: $e")
+    end
+end
+
+# What the Name Recognition screen can offer for a class: what is stored, whether a
+# .namereader exists, and how much of the store it has never seen.
+@get "/api/class_name_data" function(req::HTTP.Request)
+    query = HTTP.URIs.queryparams(HTTP.URI(req.target))
+    class_name = _optional_path(get(query, "class_name", nothing))
+    if class_name === nothing
+        return Dict("status" => "error", "message" => "`class_name` is required.")
+    end
+    try
+        summary = class_name_data_summary(class_name)
+        summary["status"] = "success"
+        return summary
+    catch e
+        return Dict("status" => "error", "message" => "Could not read name data for $(class_name): $e")
+    end
+end
+
+# Class + name-reader context for a .assnversions / .assn path, used to offer name guessing
+# and to flag a roster that has drifted from the app's copy.
+@post "/api/archive_class_info" function(req::HTTP.Request)
+    data = Oxygen.json(req)
+    archive_file = _optional_path(get(data, "archive_file", nothing))
+    if archive_file === nothing
+        return Dict("status" => "error", "message" => "`archive_file` is required.")
+    elseif !isfile(archive_file)
+        return Dict("status" => "error", "message" => "Could not find archive at: $archive_file")
+    end
+    try
+        status = archive_roster_status(archive_file)
+        class_name = get(status, "class_name", nothing)
+        namereader = class_namereader_for_guessing(class_name)
+        status["status"] = "success"
+        status["has_namereader"] = namereader !== nothing
+        status["namereader_path"] = namereader
+        return status
+    catch e
+        return Dict("status" => "error", "message" => "Could not read the archive's class roster: $e")
+    end
+end
+
+# Replace the roster inside a .assnversions / .assn with the app's copy. The archive has to be
+# repacked, so grading uses the open-archive route below instead.
+@post "/api/archive_apply_app_roster" function(req::HTTP.Request)
+    data = Oxygen.json(req)
+    archive_file = _optional_path(get(data, "archive_file", nothing))
+    if archive_file === nothing
+        return Dict("status" => "error", "message" => "`archive_file` is required.")
+    elseif !isfile(archive_file)
+        return Dict("status" => "error", "message" => "Could not find archive at: $archive_file")
+    end
+    open_archive = STATE["assn_archive_path"]
+    if isa(open_archive, AbstractString) && abspath(String(open_archive)) == abspath(archive_file)
+        return Dict(
+            "status" => "error",
+            "message" => "That archive is open for grading; close it before updating its roster.",
+        )
+    end
+    try
+        status = with_archive_dir(String(archive_file)) do archive_dir
+            result = apply_app_roster_to_dir(archive_dir)
+            make_archive_from_dir(archive_dir, String(archive_file); rebuild=true)
+            result
+        end
+        status["status"] = "success"
+        status["differs"] = false
+        return status
+    catch e
+        return Dict("status" => "error", "message" => "Could not update the archive's roster: $e")
+    end
+end
+
+# Patch the roster in the unpacked archive currently open for grading. It is folded back into
+# the .assn the same way the rest of the grading work is.
+@post "/api/open_archive_apply_app_roster" function(req::HTTP.Request)
+    temp_dir = STATE["temp_archive_dir"]
+    if isnothing(temp_dir)
+        return Dict("status" => "error", "message" => "No archive loaded")
+    end
+    try
+        status = apply_app_roster_to_dir(String(temp_dir))
+        status["status"] = "success"
+        status["differs"] = false
+        return status
+    catch e
+        return Dict("status" => "error", "message" => "Could not update the roster: $e")
     end
 end
 
