@@ -11,7 +11,8 @@ Start from a course workspace (masters, scans, archives):
 
 System dependencies (not Julia packages): Typst on `PATH`, and libdmtx plus whatever
 native libraries OpenCV.jl needs for your OS (`brew install libdmtx` on macOS;
-`libdmtx0t64` / `libdmtx-dev` on Debian/Ubuntu).
+`libdmtx0t64` / `libdmtx-dev` on Debian/Ubuntu). PDF scans are rasterized with
+the bundled `Poppler_jll` (`pdftoppm`); no system Poppler install is required.
 
 Templates and static files live in the package (`package_root()`). Per-user credentials
 live under `~/.config/biscuit/`. Assignment inputs/outputs stay in `pwd()`.
@@ -46,6 +47,9 @@ using .NameReader
 include("NameStore.jl")
 using .NameStore
 
+include("ScanInput.jl")
+using .ScanInput
+
 include("ProcessScans.jl")
 using .ProcessScans
 
@@ -56,6 +60,7 @@ export package_root, config_dir, workspace_root
 export serve, serveparallel, terminate, julia_main
 export generate_assn_files, process_scans, extract_name_field_crops
 export NameReader
+export ScanInput
 export train_name_reader
 
 end # module

@@ -14,7 +14,7 @@ const WORKFLOW_SLOTS = {
 const WORKFLOW_STEP_TOOLTIPS = {
     'assignment-pdfs': 'Step [1] generates one pdf for every assignment version (plus the key).',
     'students-complete': 'Each student gets a unique version of the assignment. Notes:\n - Multiple copies of the same version should not be distributed to students.',
-    'scan-file': 'Scan all student pages as a single `.tiff` file. Notes:\n - Preferrably, use a scan resolution at least 200 dpi.\n - This scan will be converted to a pure black-and-white photo (not greyscale) so no need to use a different color setting than that.\n - If the assignments have staples in the corner, you can physically cut the corner of the assignment to remove the staple. The remaining anchor boxes (black dots around perimeter) will be sufficient for recognition. If you do this, consider feeding pages into the scanner backwards to give scanner a full edge to work with.',
+    'scan-file': 'Scan all student pages as a single multi-page `.tiff` or `.pdf`, or as a folder of `.png` / `.jpeg` / `.tiff` / `.pdf` files (page order is the natural filename order; subfolders are ignored). Notes:\n - Preferrably, use a scan resolution at least 200 dpi. PDFs are rasterized at 300 dpi.\n - This scan will be converted to a pure black-and-white photo (not greyscale) so no need to use a different color setting than that.\n - If the assignments have staples in the corner, you can physically cut the corner of the assignment to remove the staple. The remaining anchor boxes (black dots around perimeter) will be sufficient for recognition. If you do this, consider feeding pages into the scanner backwards to give scanner a full edge to work with.',
     'assnversions': 'Step [1] generates this file alongside the assignment versions `.pdf`s. This file contains information about where questions and answer bubbles are physically located in the assignments.',
     'assn': 'Step [2] generates this file, which contains scanned pages of student work, computer-detected answers, and all other information required for grading.',
     'feedback-pdfs': 'Step [3] generates these per-student feedback `.pdf`s exported after grading.\n - #drive If the class roster included an `Email` column when the assignment was created (see step [1]), Finish & Export can upload PDFs under `Biscuit/class_name` in Google Drive after a one-time Google account link.',
@@ -318,6 +318,10 @@ function pickFolder(inputId) {
 function useCurrentPickerFolder() {
     const dir = document.getElementById('file-picker-dir').textContent;
     document.getElementById(currentPickerInput).value = dir;
+    if (currentPickerInput === 'proc-tiff-path') {
+        syncProcessNameFromTiff();
+        bustScanImageCache();
+    }
     closeFilePicker();
 }
 
@@ -467,7 +471,7 @@ function syncProcessNameFromPath() {
     updateProcessNameStatus();
 }
 
-// Non-Biscuit runs have no .assnversions to name the output after, so follow the TIFF instead.
+// Non-Biscuit runs have no .assnversions to name the output after, so follow the scan source instead.
 function syncProcessNameFromTiff() {
     if (!isNonBiscuitMode()) return;
     const tiffPath = document.getElementById('proc-tiff-path').value;

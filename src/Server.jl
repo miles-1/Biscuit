@@ -12,6 +12,7 @@ using ..GoogleDrive
 using ..Classes
 using ..GenerateAssnFiles
 using ..ProcessScans
+using ..ScanInput
 using ..NameReader
 using ..NameStore
 using ..Paths: package_root, resolve_under_workspace, config_dir

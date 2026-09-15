@@ -54,13 +54,13 @@ end
 @websocket "/api/ws_process" function(ws)
     for msg in ws
         data = JSON.parse(String(msg))
-        tiff_file = data["tiff_file"]
+        tiff_file = String(get(data, "tiff_file", get(data, "scan_path", "")))
         non_biscuit = get(data, "non_biscuit", false) === true
         assn_versions_file = String(get(data, "assn_file", ""))
         corrections = get(data, "corrections", Dict{String, Any}())
         
-        if !isfile(tiff_file)
-            throw(ArgumentError("`tiff_file` was provided but could not be found: $tiff_file"))
+        if !is_scan_path(tiff_file)
+            throw(ArgumentError("Scan path was provided but could not be found: $tiff_file"))
         elseif !non_biscuit && !isfile(assn_versions_file)
             throw(ArgumentError("`assn_versions_file` was provided but could not be found: $assn_versions_file"))
         end

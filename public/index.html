@@ -140,9 +140,13 @@
     <!-- 2. Process Scans -->
     <div id="process-sec" class="section hidden">
         <h2>Process Scans</h2>
-        <label>TIFF File Path:</label><br>
-        <input type="text" id="proc-tiff-path" oninput="syncProcessNameFromTiff(); bustScanImageCache()">
-        <button onclick="pickFile('proc-tiff-path', ['.tif', '.tiff'])">Browse</button><br>
+        <label>Scans <em>(TIFF, PNG, JPEG, PDF, or a folder of those)</em>:</label><br>
+        <div class="proc-input-row">
+            <input type="text" id="proc-tiff-path" oninput="syncProcessNameFromTiff(); bustScanImageCache()">
+            <button type="button" onclick="pickFile('proc-tiff-path', ['.tif', '.tiff', '.png', '.jpg', '.jpeg', '.pdf'])">Browse File</button>
+            <button type="button" onclick="pickFolder('proc-tiff-path')">Browse Folder</button>
+        </div>
+        <br>
         <div class="proc-source-row">
             <div id="proc-biscuit-group" class="proc-source-group">
                 <label for="proc-assnversions-path">Assignment Versions File Path (.assnversions):</label>

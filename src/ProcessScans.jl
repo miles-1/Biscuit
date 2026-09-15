@@ -7,6 +7,7 @@ using ..ArchiveUtils
 using ..Dmtx: decode_matrix
 using ..NameReader: load_name_reader, guess_assignment_names
 using ..NameStore: NameImageCandidate, merge_name_images!
+using ..ScanInput
 using ..Classes: read_roster_table
 
 export process_scans, process_non_biscuit_scans, export_name_training_data, extract_name_field_crops
@@ -29,23 +30,6 @@ function perspective_transform_points(points, H)::Points2F64
         push!(out, (Float64(mapped[1, 1, i]), Float64(mapped[2, 1, i])))
     end
     return out
-end
-
-# Load each TIFF page as grayscale. Accepts color, grayscale, or already-binary scans.
-function load_gray_pages(tiff_path::String)
-    ret, pages = cv.imreadmulti(tiff_path; flags=cv.IMREAD_GRAYSCALE)
-    if !ret
-        error("Could not load TIFF file at $tiff_path")
-    end
-    return pages
-end
-
-# Otsu-binarize grayscale pages to pure black/white (ink=0, paper=255).
-function load_binary_pages(tiff_path::String)
-    return map(load_gray_pages(tiff_path)) do image_3d
-        _, binary = cv.threshold(image_3d, 0.0, 255.0, cv.THRESH_BINARY | cv.THRESH_OTSU)
-        binary
-    end
 end
 
 # Printed payload is 3 bytes: (assn_id ÷ 256, assn_id % 256, page), then base64.
@@ -178,7 +162,7 @@ function _english_join_ints(indices::Vector{Int64})::String
 end
 
 function extract_tiff_data(
-    tiff_path::String;
+    scan::ScanInputSession;
     corrections::Dict{String, Any}=Dict{String, Any}(),
     page_elements_data,
 )::Tuple{Dict{Int64, Dict{Int64, NamedTuple}}, Dict{Int64, NTuple{2, Int64}}, Dict{Int64, Dict{String, Any}}}
@@ -187,7 +171,7 @@ function extract_tiff_data(
     identify_issues = Dict{Int64, Dict{String, Any}}()
     decoded = NamedTuple[]
     printstyled("Reading Data Matrices and Locating Anchors\n"; bold=true, underline=true)
-    pages = load_binary_pages(tiff_path)
+    pages = load_binary_pages(scan)
     for (ppage_indx, image_3d) in enumerate(pages)
         println("- Page $ppage_indx...")
         w, h = Int64(size(image_3d, 2)), Int64(size(image_3d, 3))
@@ -359,12 +343,12 @@ function black_pixel_proportion_in_radius(frame_array::Matrix{UInt8}, bubble_poi
 end
 
 function get_question_info_by_assn(
-    tiff_path::String;
+    scan::ScanInputSession;
     mapped_data::Dict{Int64, Dict{Int64, NamedTuple}},
     page_elements_data,
     ppage_dict::Dict{Int64, NTuple{2, Int64}},
 )::Dict{Int64, Vector{NamedTuple}}
-    pages = load_binary_pages(tiff_path)
+    pages = load_binary_pages(scan)
     assn_data = Dict{Int64, Vector{NamedTuple}}()
     printstyled("Collecting Mapped Page Elements\n"; bold=true, underline=true)
     for (ppage_indx, image_3d) in enumerate(pages)
@@ -628,7 +612,7 @@ function save_annotated_assn(
 end
 
 function generate_marked_tiffs(
-    tiff_path::String; 
+    scan::ScanInputSession;
     tiff_data::Dict{Int64, Dict{Int64, NamedTuple}}, 
     mapped_data::Dict{Int64, Dict{Int64, NamedTuple}},
     ppage_dict::Dict{Int64, NTuple{2, Int64}},
@@ -637,10 +621,7 @@ function generate_marked_tiffs(
     identify_issues::Dict{Int64, Dict{String, Any}}=Dict{Int64, Dict{String, Any}}(),
 )::Nothing
     scan_results = Dict{String, Any}[]
-    ret, pages = cv.imreadmulti(tiff_path; flags=cv.IMREAD_COLOR)
-    if !ret
-        error("Could not load TIFF file at $tiff_path")
-    end
+    pages = load_color_pages(scan)
     printstyled("Annotating Pages\n"; bold=true, underline=true)
     if isdir(output_dir)
         rm(output_dir, recursive=true)
@@ -820,7 +801,7 @@ function _name_corner_group(entry, key::AbstractString)
 end
 
 """
-    snapshot_name_crops(; tiff_path, processed_assn_data, ppage_dict, archive_dir)
+    snapshot_name_crops(; scan, processed_assn_data, ppage_dict, archive_dir)
 
 Cut the handwritten name-table boxes and the printed name line out of the raw
 scans and store them, unlabeled, in the archive under `name_crops/`.
@@ -836,7 +817,7 @@ file names here are assignment ids. Returns the folder, or `nothing` when the
 assignment has no name marks at all.
 """
 function snapshot_name_crops(;
-    tiff_path::String,
+    scan::ScanInputSession,
     processed_assn_data::Dict{Int64, Dict{String, Any}},
     ppage_dict::Dict{Int64, NTuple{2, Int64}},
     archive_dir::String,
@@ -858,7 +839,7 @@ function snapshot_name_crops(;
 
     ppage_of = Dict((assn_id, page) => ppage for (ppage, (assn_id, page)) in pairs(ppage_dict))
     printstyled("Saving Name Crops\n"; bold=true, underline=true)
-    pages = load_gray_pages(tiff_path)
+    pages = load_gray_pages(scan)
     n_table = 0
     n_field = 0
 
@@ -1027,7 +1008,7 @@ function _merge_and_report(class_name::AbstractString, candidates::Vector{NameIm
 end
 
 function process_scans(
-    tiff_path::String;
+    scan_path::String;
     assn_versions_file::String,
     corrections::Dict{String, Any}=Dict{String, Any}(),
     namereader_file::Union{Nothing, AbstractString}=nothing,
@@ -1042,34 +1023,37 @@ function process_scans(
     assn_archive_file = joinpath(assn_archive_dir, stem * ".assn")
     cp(assn_versions_file, assn_archive_file; force=true)
     println("Created: $assn_archive_file (copied from $assn_versions_file)")
-    with_archive_dir(assn_archive_file) do archive_dir
-        page_elements_file = joinpath(archive_dir, "page_elements.json")
-        @assert isfile(page_elements_file) "Missing page_elements.json in assnversions archive: $assn_versions_file"
-        annotated_dir = joinpath(archive_dir, "annotated")
-        page_elements_data = load_page_elements_data(page_elements_file)
-        tiff_data, ppage_dict, identify_issues = extract_tiff_data(tiff_path; corrections, page_elements_data)
-        mapped_data = get_mapped_data(; tiff_data, page_elements_data)
-        assn_data = get_question_info_by_assn(tiff_path; mapped_data, page_elements_data, ppage_dict)
-        processed_assn_data = process_assn_data(assn_data; mapped_data, output_dir=archive_dir)
-        # Snapshot before annotation: the marks drawn below would otherwise land in the crops.
-        snapshot_name_crops(; tiff_path, processed_assn_data, ppage_dict, archive_dir)
-        if namereader_file !== nothing && !isempty(strip(String(namereader_file)))
-            apply_name_reader_guesses!(
-                processed_assn_data;
-                tiff_path,
-                ppage_dict,
-                mapped_data,
-                archive_dir,
-                namereader_file=String(namereader_file),
-            )
-        end
-        generate_marked_tiffs(tiff_path; ppage_dict, tiff_data, mapped_data, processed_assn_data, output_dir=annotated_dir, identify_issues)
-        make_archive_from_dir(archive_dir, assn_archive_file)
-        println("Updated: $assn_archive_file (added processed_assn_data.json and annotated scans)")
-        stale_tmp = abspath(assn_archive_file) * ".tmp"
-        if isdir(stale_tmp)
-            rm(stale_tmp; recursive=true, force=true)
-            println("Removed stale extract: $stale_tmp")
+    with_scan_input(scan_path) do scan
+        println("Reading scans: ", scan.source)
+        with_archive_dir(assn_archive_file) do archive_dir
+            page_elements_file = joinpath(archive_dir, "page_elements.json")
+            @assert isfile(page_elements_file) "Missing page_elements.json in assnversions archive: $assn_versions_file"
+            annotated_dir = joinpath(archive_dir, "annotated")
+            page_elements_data = load_page_elements_data(page_elements_file)
+            tiff_data, ppage_dict, identify_issues = extract_tiff_data(scan; corrections, page_elements_data)
+            mapped_data = get_mapped_data(; tiff_data, page_elements_data)
+            assn_data = get_question_info_by_assn(scan; mapped_data, page_elements_data, ppage_dict)
+            processed_assn_data = process_assn_data(assn_data; mapped_data, output_dir=archive_dir)
+            # Snapshot before annotation: the marks drawn below would otherwise land in the crops.
+            snapshot_name_crops(; scan, processed_assn_data, ppage_dict, archive_dir)
+            if namereader_file !== nothing && !isempty(strip(String(namereader_file)))
+                apply_name_reader_guesses!(
+                    processed_assn_data;
+                    scan,
+                    ppage_dict,
+                    mapped_data,
+                    archive_dir,
+                    namereader_file=String(namereader_file),
+                )
+            end
+            generate_marked_tiffs(scan; ppage_dict, tiff_data, mapped_data, processed_assn_data, output_dir=annotated_dir, identify_issues)
+            make_archive_from_dir(archive_dir, assn_archive_file)
+            println("Updated: $assn_archive_file (added processed_assn_data.json and annotated scans)")
+            stale_tmp = abspath(assn_archive_file) * ".tmp"
+            if isdir(stale_tmp)
+                rm(stale_tmp; recursive=true, force=true)
+                println("Removed stale extract: $stale_tmp")
+            end
         end
     end
 end
@@ -1169,19 +1153,19 @@ function _write_non_biscuit_annotated(pages, output_dir::String; pages_per_stude
 end
 
 """
-    process_non_biscuit_scans(tiff_path; pages_per_student, total_points, assn_type, kwargs...)
+    process_non_biscuit_scans(scan_path; pages_per_student, total_points, assn_type, kwargs...)
 
 Build a gradeable `.assn` archive from scans Biscuit did not generate.
 
 These pages carry no data matrix and no anchors, so page identity comes from position alone:
-TIFF page `i` (1-based) belongs to assignment `(i - 1) ÷ pages_per_student` at its page
+scan page `i` (1-based) belongs to assignment `(i - 1) ÷ pages_per_student` at its page
 `(i - 1) % pages_per_student + 1`. The page count must divide evenly.
 
 The archive describes a one-question dummy assignment worth `total_points`, so the grading
 UI has a single score per submission to fill in. Returns the `.assn` path.
 """
 function process_non_biscuit_scans(
-    tiff_path::String;
+    scan_path::String;
     pages_per_student::Integer,
     total_points::Real,
     assn_type::AbstractString,
@@ -1199,28 +1183,45 @@ function process_non_biscuit_scans(
     end
 
     per_student = Int(pages_per_student)
-    ret, pages = cv.imreadmulti(tiff_path; flags=cv.IMREAD_COLOR)
-    ret || error("Could not load TIFF file at $tiff_path")
-    num_pages = length(pages)
-    num_pages > 0 || error("No pages found in TIFF file at $tiff_path")
-    num_pages % per_student == 0 || error(
-        "TIFF has $num_pages page(s), which is not a multiple of the $per_student " *
-        "page(s) per student. Fix the scan or the page count, then try again."
-    )
-    num_students = num_pages ÷ per_student
+    return with_scan_input(scan_path) do scan
+        pages = load_color_pages(scan)
+        num_pages = length(pages)
+        num_pages > 0 || error("No pages found in scans at $(scan.source)")
+        num_pages % per_student == 0 || error(
+            "Scans have $num_pages page(s), which is not a multiple of the $per_student " *
+            "page(s) per student. Fix the scan or the page count, then try again."
+        )
+        num_students = num_pages ÷ per_student
 
-    out_dir = dirname(abspath(tiff_path))
-    stem = if output_name !== nothing && !isempty(strip(String(output_name)))
-        String(strip(String(output_name)))
-    else
-        first(splitext(basename(tiff_path)))
+        stem = if output_name !== nothing && !isempty(strip(String(output_name)))
+            String(strip(String(output_name)))
+        else
+            scan.output_stem
+        end
+        assn_archive_file = joinpath(scan.output_dir, stem * ".assn")
+
+        printstyled("Processing Non-Biscuit Scans\n"; bold=true, underline=true)
+        println("- Reading scans: ", scan.source)
+        println("- $num_pages page(s) at $pages_per_student per student → $num_students submission(s)")
+        println("- Dummy $assn_type question worth $total_points point(s)")
+
+        _process_non_biscuit_pages(
+            pages, assn_archive_file;
+            per_student, num_students, stem, assn_type, total_points, class_csv_file,
+        )
     end
-    assn_archive_file = joinpath(out_dir, stem * ".assn")
+end
 
-    printstyled("Processing Non-Biscuit Scans\n"; bold=true, underline=true)
-    println("- $num_pages page(s) at $pages_per_student per student → $num_students submission(s)")
-    println("- Dummy $assn_type question worth $total_points point(s)")
-
+function _process_non_biscuit_pages(
+    pages,
+    assn_archive_file::String;
+    per_student::Int,
+    num_students::Int,
+    stem::String,
+    assn_type::AbstractString,
+    total_points::Real,
+    class_csv_file,
+)::String
     mktempdir() do build_dir
         write_json(name, data) = open(joinpath(build_dir, name), "w") do f
             JSON.print(f, data)
@@ -1303,28 +1304,46 @@ function _ppage_index_from_datamatrix(pages)::Dict{Tuple{Int64,Int64},Int}
 end
 
 """
-    extract_name_field_crops(tiff_path, processed_assn_data; kwargs...)
+    extract_name_field_crops(scan_path, processed_assn_data; kwargs...)
     extract_name_field_crops(pages, processed_assn_data; kwargs...)
 
 Warp each assignment's printed name field to the 550×151 canvas used by NameReader.
 
-TIFF page → assignment mapping (first match wins):
+Scan page → assignment mapping (first match wins):
 - `ppage_of[(assn_id, page)] = tiff_page` if provided
 - else decode datamatrices when `decode_datamatrix=true`
-- else `assn_page_order[i]` is the assignment id on 1-based TIFF page `i`
+- else `assn_page_order[i]` is the assignment id on 1-based scan page `i`
 
 Each result is `(; assn_id, page, tiff_page, crop)` with `crop` a `(height, width)`
 `Float32` grayscale image in `[0, 1]`.
 """
 function extract_name_field_crops(
-    tiff_path::String,
+    scan_path::String,
+    processed_assn_data;
+    ppage_of::Union{Nothing,AbstractDict}=nothing,
+    assn_page_order::Union{Nothing,AbstractVector{<:Integer}}=nothing,
+    decode_datamatrix::Bool=false,
+)
+    return with_scan_input(scan_path) do scan
+        extract_name_field_crops(
+            load_binary_pages(scan),
+            processed_assn_data;
+            ppage_of,
+            assn_page_order,
+            decode_datamatrix,
+        )
+    end
+end
+
+function extract_name_field_crops(
+    scan::ScanInputSession,
     processed_assn_data;
     ppage_of::Union{Nothing,AbstractDict}=nothing,
     assn_page_order::Union{Nothing,AbstractVector{<:Integer}}=nothing,
     decode_datamatrix::Bool=false,
 )
     return extract_name_field_crops(
-        load_binary_pages(tiff_path),
+        load_binary_pages(scan),
         processed_assn_data;
         ppage_of,
         assn_page_order,
@@ -1378,7 +1397,7 @@ end
 
 function apply_name_reader_guesses!(
     processed_assn_data::Dict;
-    tiff_path::String,
+    scan::ScanInputSession,
     ppage_dict::Dict{Int64, NTuple{2, Int64}},
     mapped_data,
     archive_dir::String,
@@ -1391,7 +1410,7 @@ function apply_name_reader_guesses!(
         page_of[(assn_id, page)] = ppage
     end
 
-    extracted = extract_name_field_crops(tiff_path, processed_assn_data; ppage_of=page_of)
+    extracted = extract_name_field_crops(scan, processed_assn_data; ppage_of=page_of)
     if isempty(extracted)
         println("NameReader: no name-field crops found (assignments need the Typst name-line marks).")
         return processed_assn_data
