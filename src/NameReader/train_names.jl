@@ -1,6 +1,5 @@
 using Dates
 using Flux
-using JSON
 using Random
 using Statistics
 
@@ -519,7 +518,7 @@ unreadable. `sidecar["students"]` is what `split_name_handwriting` wants for
 function read_training_sidecar(path::AbstractString)::Union{Nothing,Dict{String,Any}}
     isfile(path) || return nothing
     data = try
-        JSON.parsefile(String(path))
+        json_parsefile(String(path))
     catch
         return nothing
     end
@@ -530,7 +529,7 @@ end
 function write_training_sidecar(path::AbstractString, data::AbstractDict)
     mkpath(dirname(abspath(String(path))))
     open(String(path), "w") do io
-        JSON.print(io, data, 2)
+        json_print(io, data, 2)
     end
     return String(path)
 end

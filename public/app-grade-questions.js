@@ -1221,7 +1221,7 @@ function showExportResultModal() {
     }
     if (exportModalState.nameTrainingDir) {
         const summary = exportModalState.nameTrainingSummary;
-        lines.push(`Name training data${summary ? ` (${summary})` : ''} stored in:\n${exportModalState.nameTrainingDir}`);
+        lines.push(`Name training data${summary ? ` (${summary})` : ''} stored in:\n${exportModalState.nameTrainingDir}. Click "classes" above to manually validate data.`);
     }
     const bodyParts = [
         `<div class="path-block">${lines.join("\n\n")}</div>`,
@@ -1569,8 +1569,8 @@ async function finishGrading() {
             if (ntRes.ok && ntData.status === "success") {
                 exportModalState.nameTrainingDir = ntData.output_dir || null;
                 exportModalState.nameTrainingSummary = ntData.exported
-                    ? `Added ${ntData.added} name image(s) for ${ntData.students} student(s)`
-                        + `${ntData.skipped ? `, skipped ${ntData.skipped} already stored` : ''}.`
+                    ? `Added ${ntData.added} name images for ${ntData.students} students`
+                        + `${ntData.skipped ? `, skipped ${ntData.skipped} already stored` : ''}`
                     : null;
             } else {
                 errors.push(ntData.message || "Failed to store name training data.");

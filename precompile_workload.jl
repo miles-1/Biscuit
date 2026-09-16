@@ -5,7 +5,6 @@
 
 using Biscuit
 using HTTP
-using JSON
 using JSON3
 using CSV
 using YAML
@@ -57,13 +56,9 @@ end
 
 # 4. JSON, CSV, YAML serialization
 sample_dict = Dict{String, Any}("status" => "ok", "items" => [1, 2, 3], "nested" => Dict("a" => true))
-sample_json = JSON.json(sample_dict)
-_ = JSON.parse(sample_json)
-
-try
-    _ = JSON3.read(sample_json)
-catch
-end
+sample_json = JSON3.write(sample_dict)
+_ = JSON3.read(sample_json)
+_ = Biscuit.JsonIO.json_parse(sample_json)
 
 try
     _ = YAML.load(YAML.dump(sample_dict))

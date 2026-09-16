@@ -86,7 +86,7 @@ uuid = "2a0f44e3-6c83-55bd-87e4-b1978d98bd5f"
 version = "1.11.0"
 
 [[deps.Biscuit]]
-deps = ["Base64", "CSV", "Colors", "Dates", "FileIO", "Flux", "HTTP", "Hungarian", "ImageIO", "JSON", "JSON3", "Libdl", "LinearAlgebra", "OpenCV", "Oxygen", "Random", "SHA", "Serialization", "Sockets", "Statistics", "YAML", "ZipFile"]
+deps = ["Base64", "CSV", "Colors", "Dates", "FileIO", "Flux", "HTTP", "Hungarian", "ImageIO", "JSON3", "Libdl", "LinearAlgebra", "OpenCV", "Oxygen", "Random", "SHA", "Serialization", "Sockets", "Statistics", "YAML", "ZipFile"]
 path = "."
 uuid = "3c8ea17f-cb20-4dd8-9331-be30d4796056"
 version = "0.1.0"
@@ -571,12 +571,6 @@ deps = ["Artifacts", "Preferences"]
 git-tree-sha1 = "7204148362dafe5fe6a273f855b8ccbe4df8173e"
 uuid = "692b3bcd-3c85-4b1f-b108-f13ce0eb3210"
 version = "1.8.0"
-
-[[deps.JSON]]
-deps = ["Dates", "Mmap", "Parsers", "Unicode"]
-git-tree-sha1 = "31e996f0a15c7b280ba9f76636b3ff9e2ae58c9a"
-uuid = "682c06a0-de6a-54ab-a142-c8b1cf79cde6"
-version = "0.21.4"
 
 [[deps.JSON3]]
 deps = ["Dates", "Mmap", "Parsers", "PrecompileTools", "StructTypes", "UUIDs"]

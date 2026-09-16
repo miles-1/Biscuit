@@ -3,7 +3,7 @@ function _register_routes!()
 
 @websocket "/api/ws_generate" function(ws)
     for msg in ws
-        data = JSON.parse(String(msg))
+        data = json_parse(String(msg))
         master_file = data["master_file"]
         class_name = get(data, "class_name", nothing)
         output_name = get(data, "new_file_name", nothing)
@@ -53,7 +53,7 @@ end
 
 @websocket "/api/ws_process" function(ws)
     for msg in ws
-        data = JSON.parse(String(msg))
+        data = json_parse(String(msg))
         tiff_file = String(get(data, "tiff_file", get(data, "scan_path", "")))
         non_biscuit = get(data, "non_biscuit", false) === true
         assn_versions_file = String(get(data, "assn_file", ""))
@@ -158,7 +158,7 @@ end
     end
     try
         for msg in ws
-            data = JSON.parse(String(msg))
+            data = json_parse(String(msg))
             if get(data, "cancel", false) == true
                 stop_flag[] = true
                 save_on_stop[] = false
@@ -442,7 +442,7 @@ end
     try
         output_file = joinpath(temp_dir, "grading_data.json")
         open(output_file, "w") do f
-            JSON.print(f, grading_data)
+            json_print(f, grading_data)
         end
     catch e
         return Dict("status" => "error", "message" => "Failed to save work to archive: $e")
@@ -914,7 +914,7 @@ end
 # Stream Google Drive upload logs + final summary over a websocket.
 @websocket "/api/ws_upload_drive" function(ws)
     for msg in ws
-        data = JSON.parse(String(msg))
+        data = json_parse(String(msg))
         feedback_dir = string(get(data, "feedback_dir", ""))
         duplicate_policy = string(get(data, "duplicate_policy", "add_new"))
         ctx = _drive_upload_context(feedback_dir)
@@ -953,7 +953,7 @@ end
             catch e
                 println("Warning: could not add Google Drive links to the detailed CSV: $e")
             end
-            println("SUMMARY:" * JSON.json(Dict(
+            println("SUMMARY:" * json_string(Dict(
                 "status" => "success",
                 "summary" => summary,
                 "assn_type" => ctx["assn_type"],
@@ -1034,7 +1034,7 @@ end
             validate_master_json(Dict{String, Any}(string(k) => v for (k, v) in pairs(master_dict)))
             return Dict("status" => "success", "message" => "master .json validated")
         elseif haskey(data, "json_string")
-            parsed = JSON.parse(string(data["json_string"]))
+            parsed = json_parse(string(data["json_string"]))
             if !isa(parsed, AbstractDict) && !isa(parsed, Dict)
                 return Dict("status" => "error", "message" => "Top-level value must be a JSON object.")
             end
@@ -1056,7 +1056,7 @@ end
         _normalize_json_types(data["master"])
     elseif haskey(data, "json_string")
         try
-            JSON.parse(string(data["json_string"]))
+            json_parse(string(data["json_string"]))
         catch e
             return Dict("status" => "error", "message" => "Invalid JSON syntax: $(sprint(showerror, e))")
         end
@@ -1084,7 +1084,7 @@ end
 
         master_file_path = joinpath(preview_dir, "master.json")
         open(master_file_path, "w") do f
-            JSON.print(f, master_data)
+            json_print(f, master_data)
         end
 
         stderr_buf = IOBuffer()
@@ -1231,7 +1231,7 @@ end
 
         preview_json = joinpath(preview_dir, "preview.json")
         open(preview_json, "w") do f
-            JSON.print(f, preview_payload)
+            json_print(f, preview_payload)
         end
 
         tmp_svg = joinpath(preview_dir, "question.tmp.svg")
@@ -1321,7 +1321,7 @@ end
     try
         mkpath(dirname(target_path))
         open(target_path, "w") do f
-            JSON.print(f, master_data, 2)
+            json_print(f, master_data, 2)
         end
         return Dict("status" => "success", "path" => target_path, "display_path" => raw_path)
     catch e

@@ -1,6 +1,5 @@
 module ArchiveUtils
 
-using JSON
 using ZipFile
 
 export get_archive_path

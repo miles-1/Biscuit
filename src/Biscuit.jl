@@ -23,6 +23,9 @@ Name-image matching lives in the `NameReader` submodule (`Biscuit.NameReader`).
 include("Paths.jl")
 using .Paths
 
+include("JsonIO.jl")
+using .JsonIO
+
 include("ArchiveUtils.jl")
 using .ArchiveUtils
 

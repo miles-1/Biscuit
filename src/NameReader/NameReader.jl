@@ -1,6 +1,7 @@
 module NameReader
 
 using ..Paths: package_root
+using ..JsonIO
 
 """
     NameReader

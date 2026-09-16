@@ -1,8 +1,8 @@
 module GenerateAssnFiles
 
-using JSON
 using Random
 using ..ArchiveUtils
+using ..JsonIO
 using ..Commands
 
 export generate_assn_files, validate_master_json, validate_master_json_file, preview_selection_for_question
@@ -477,7 +477,7 @@ function validate_master_json(master::Dict{String, Any})::Nothing
 end
 
 function validate_master_json_file(master_file::String)::Dict{String, Any}
-    master = JSON.parsefile(master_file)
+    master = json_parsefile(master_file)
     if !isa(master, Dict)
         _validation_error("root", "top-level value must be a json object.")
     end
@@ -591,7 +591,7 @@ function preview_selection_for_question(question::Dict; seed::Integer=1234)
 end
 
 function generate_selection_json(; master_file::String, output_dir::String, preview::Bool=false)::String
-    master = JSON.parsefile(master_file)
+    master = json_parsefile(master_file)
     output_file = joinpath(output_dir, "selection.json")
     seed = get(master, "seed", 1234)
     rng = Xoshiro(seed)
@@ -624,7 +624,7 @@ function generate_selection_json(; master_file::String, output_dir::String, prev
         append!(versions, student_versions)
     end
     selection = Dict("versions" => versions)
-    open(output_file, "w") do f; JSON.print(f, selection) end
+    open(output_file, "w") do f; json_print(f, selection) end
     println("Created: selection.json - $version_count student version(s) and 1 key")
     return output_file
 end
@@ -663,9 +663,9 @@ end
 function generate_page_elements_json(; master_file::String, selection_file::String, output_dir::String)::Nothing
     query_output = typst_query_assn(; master_file, selection_file, label="page_elems")
     query_output = replace(query_output, r"\"([\d\.]+)pt\"" => s"\1")
-    parsed_data = JSON.parse(query_output)
+    parsed_data = json_parse(query_output)
     output_file = joinpath(output_dir, "page_elements.json")
-    open(output_file, "w") do f; JSON.print(f, parsed_data) end
+    open(output_file, "w") do f; json_print(f, parsed_data) end
     println("Created: page_elements.json")
     return nothing
 end

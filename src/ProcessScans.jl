@@ -2,8 +2,8 @@ module ProcessScans
 
 import OpenCV as cv
 using Base64: base64decode
-using JSON
 using ..ArchiveUtils
+using ..JsonIO
 using ..Dmtx: decode_matrix
 using ..NameReader: load_name_reader, guess_assignment_names
 using ..NameStore: NameImageCandidate, merge_name_images!
@@ -149,7 +149,7 @@ function load_page_elements_data(page_elements_file::String)
     return Dict(
         parse(Int64, assn_id) => Dict(
             parse(Int64, page) => elems for (page, elems) in page_dict
-        ) for (assn_id, page_dict) in JSON.parsefile(page_elements_file)
+        ) for (assn_id, page_dict) in json_parsefile(page_elements_file)
     )
 end
 
@@ -544,7 +544,7 @@ function process_assn_data(
         end
         processed_assn_data[assn_id] = entry
     end
-    open(joinpath(output_dir, "processed_assn_data.json"), "w") do f; JSON.print(f, processed_assn_data) end
+    open(joinpath(output_dir, "processed_assn_data.json"), "w") do f; json_print(f, processed_assn_data) end
     return processed_assn_data
 end
 
@@ -726,7 +726,7 @@ function generate_marked_tiffs(
     
     # Save scan_results.json
     open(joinpath(output_dir, "scan_results.json"), "w") do f
-        JSON.print(f, scan_results)
+        json_print(f, scan_results)
     end
     write_assn_page_counts(output_dir)
     return nothing
@@ -744,7 +744,7 @@ function write_assn_page_counts(annotated_dir::String)::Nothing
         counts[String(name[6:end])] = n
     end
     open(joinpath(dirname(annotated_dir), "assn_page_counts.json"), "w") do f
-        JSON.print(f, counts)
+        json_print(f, counts)
     end
     return nothing
 end
@@ -900,7 +900,7 @@ function _legacy_name_table_candidates(
     scratch_dir::AbstractString,
 )::Vector{NameImageCandidate}
     scan_results_path = joinpath(annotated_scan_folder, "scan_results.json")
-    scan_results = isfile(scan_results_path) ? JSON.parsefile(scan_results_path) : Any[]
+    scan_results = isfile(scan_results_path) ? json_parsefile(scan_results_path) : Any[]
     page_image = Dict{Tuple{Int64, Int64}, String}()
     for res in scan_results
         isa(res, AbstractDict) || continue
@@ -966,8 +966,8 @@ function export_name_training_data(;
     @assert isfile(grading_data_file) "Missing grading_data.json: $grading_data_file"
     isempty(strip(String(class_name))) && throw(ArgumentError("`class_name` is required to store name training data."))
 
-    processed = JSON.parsefile(processed_assn_data_file)
-    grading = JSON.parsefile(grading_data_file)
+    processed = json_parsefile(processed_assn_data_file)
+    grading = json_parsefile(grading_data_file)
     crops_dir = name_crops_dir(archive_dir)
 
     if isdir(crops_dir)
@@ -1147,7 +1147,7 @@ function _write_non_biscuit_annotated(pages, output_dir::String; pages_per_stude
         ))
     end
     open(joinpath(output_dir, "scan_results.json"), "w") do f
-        JSON.print(f, scan_results)
+        json_print(f, scan_results)
     end
     return nothing
 end
@@ -1224,7 +1224,7 @@ function _process_non_biscuit_pages(
 )::String
     mktempdir() do build_dir
         write_json(name, data) = open(joinpath(build_dir, name), "w") do f
-            JSON.print(f, data)
+            json_print(f, data)
         end
         write_json("master.json", _non_biscuit_master(;
             assn_type,
@@ -1430,7 +1430,7 @@ function apply_name_reader_guesses!(
     end
     guess_path = joinpath(archive_dir, "name_guesses.json")
     open(guess_path, "w") do f
-        JSON.print(f, name_guesses)
+        json_print(f, name_guesses)
     end
     println("NameReader: guessed $assigned / $(length(crops)) name(s); wrote name_guesses.json")
     return processed_assn_data

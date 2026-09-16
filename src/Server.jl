@@ -2,11 +2,11 @@ module Server
 
 using Oxygen
 using HTTP
-using JSON
 using CSV
 using Dates
 
 using ..ArchiveUtils
+using ..JsonIO
 using ..Commands
 using ..GoogleDrive
 using ..Classes
@@ -96,7 +96,7 @@ function _write_pid_file(port::Integer)::String
     path = _pid_file_path(port)
     mkpath(dirname(path))
     open(path, "w") do f
-        JSON.print(f, Dict{String, Any}(
+        json_print(f, Dict{String, Any}(
             "pid" => getpid(),
             "port" => Int(port),
             # Captured through the same query used to re-identify the pid later, so the recorded
@@ -135,7 +135,7 @@ function _retire_previous_instance!(port::Integer)::Nothing
     path = _pid_file_path(port)
     isfile(path) || return nothing
     record = try
-        JSON.parsefile(path)
+        json_parsefile(path)
     catch
         rm(path; force=true)
         return nothing

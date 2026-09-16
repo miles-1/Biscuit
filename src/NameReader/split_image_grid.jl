@@ -1,6 +1,5 @@
 using FileIO
 using ImageIO
-using JSON3
 using Oxygen
 using Random
 using HTTP
@@ -376,7 +375,7 @@ function register_manual_routes!(state::ManualLabelState)
     end
 
     Oxygen.post("/submit") do req::Oxygen.Request
-        data = JSON3.read(String(req.body), Dict{String,Any})
+        data = json_parse(String(req.body))
         label = get(data, "label", "")
         return submit_manual_label!(state, label)
     end
@@ -386,7 +385,7 @@ function register_manual_routes!(state::ManualLabelState)
     end
 
     Oxygen.post("/review") do req::Oxygen.Request
-        data = JSON3.read(String(req.body), Dict{String,Any})
+        data = json_parse(String(req.body))
         index = parse(Int, string(get(data, "index", 1)))
         return review_manual_label!(state, index)
     end

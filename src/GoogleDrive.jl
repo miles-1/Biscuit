@@ -1,12 +1,12 @@
 module GoogleDrive
 
 using HTTP
-using JSON
 using CSV
 using Random
 using Sockets
 
 using ..Paths: package_root, config_dir
+using ..JsonIO
 using ..Classes: roster_has_email
 
 export google_drive_credentials_linked
@@ -106,7 +106,7 @@ function parse_oauth_client_file(client_secrets_path::AbstractString)
     isfile(client_secrets_path) || throw(ArgumentError(
         "OAuth client secrets file not found: $client_secrets_path"
     ))
-    data = JSON.parse(read(client_secrets_path, String))
+    data = json_parse(read(client_secrets_path, String))
     client_type = if haskey(data, "installed")
         "installed"
     elseif haskey(data, "web")
@@ -267,7 +267,7 @@ function authorize_google_drive(
             status_exception=false,
         )
         res_json = try
-            JSON.parse(String(resp.body))
+            json_parse(String(resp.body))
         catch
             Dict{String, Any}("error" => "non-JSON token response", "error_description" => String(resp.body))
         end
@@ -296,7 +296,7 @@ function authorize_google_drive(
         out_dir = dirname(out)
         !isempty(out_dir) && mkpath(out_dir)
         open(out, "w") do io
-            JSON.print(io, token_out, 2)
+            json_print(io, token_out, 2)
         end
         println("Wrote Google Drive token file: $out")
         return abspath(out)
@@ -311,7 +311,7 @@ end
 Reads token.json and refreshes the access token if needed.
 """
 function get_access_token(token_path::String)::String
-    token_data = JSON.parse(read(token_path, String))
+    token_data = json_parse(read(token_path, String))
 
     if haskey(token_data, "refresh_token") && haskey(token_data, "client_id")
         # Google's token endpoint expects form-urlencoded, not JSON.
@@ -328,7 +328,7 @@ function get_access_token(token_path::String)::String
             status_exception=false,
         )
         res_json = try
-            JSON.parse(String(resp.body))
+            json_parse(String(resp.body))
         catch
             Dict{String, Any}("error" => "non-JSON token response", "error_description" => String(resp.body))
         end
@@ -376,8 +376,8 @@ function share_item(
         "emailAddress" => target_email,
     )
     post_headers = vcat(headers, ["Content-Type" => "application/json"])
-    resp = HTTP.post(url, post_headers, JSON.json(body))
-    return JSON.parse(String(resp.body))
+    resp = HTTP.post(url, post_headers, json_string(body))
+    return json_parse(String(resp.body))
 end
 
 const _DRIVE_LIST_EXTRAS = Dict(
@@ -407,7 +407,7 @@ function get_folder_id(
         q *= " and '$(parent_id)' in parents"
     end
     resp = _drive_list(headers, Dict("q" => q))
-    files = JSON.parse(String(resp.body))["files"]
+    files = json_parse(String(resp.body))["files"]
     if !isempty(files)
         return String(files[1]["id"])
     end
@@ -431,8 +431,8 @@ function create_folder(
         body_dict["parents"] = [parent_id]
     end
     post_headers = vcat(headers, ["Content-Type" => "application/json"])
-    resp = HTTP.post(url, post_headers, JSON.json(body_dict))
-    return String(JSON.parse(String(resp.body))["id"])
+    resp = HTTP.post(url, post_headers, json_string(body_dict))
+    return String(json_parse(String(resp.body))["id"])
 end
 
 """
@@ -467,7 +467,7 @@ function _list_child_folders(
             "fields" => "nextPageToken,files(id,name)",
         )
         page_token !== nothing && (query["pageToken"] = String(page_token))
-        body = JSON.parse(String(_drive_list(headers, query).body))
+        body = json_parse(String(_drive_list(headers, query).body))
         for f in get(body, "files", [])
             haskey(f, "name") && haskey(f, "id") || continue
             name_to_id[String(f["name"])] = String(f["id"])
@@ -521,7 +521,7 @@ function find_file_in_folder(
 )::Union{NamedTuple{(:id, :name), Tuple{String, String}}, Nothing}
     q = "name = '$(_drive_q_escape(filename))' and '$(parent_folder_id)' in parents and trashed = false"
     resp = _drive_list(headers, Dict("q" => q, "fields" => "files(id, name)"))
-    files = JSON.parse(String(resp.body))["files"]
+    files = json_parse(String(resp.body))["files"]
     isempty(files) && return nothing
     f = files[1]
     return (id=String(f["id"]), name=String(f["name"]))
@@ -533,7 +533,7 @@ function list_filenames_in_folder(
 )::Vector{String}
     q = "'$(parent_folder_id)' in parents and trashed = false"
     resp = _drive_list(headers, Dict("q" => q, "fields" => "files(name)"))
-    return [String(f["name"]) for f in JSON.parse(String(resp.body))["files"]]
+    return [String(f["name"]) for f in json_parse(String(resp.body))["files"]]
 end
 
 function delete_drive_file(headers::Vector{Pair{String, String}}, file_id::String)
@@ -581,7 +581,7 @@ function upload_pdf(
     boundary = "================JuliaDriveUploadBoundary=="
 
     file_bytes = read(local_file_path)
-    metadata_json = JSON.json(Dict("name" => target_filename, "parents" => [parent_folder_id]))
+    metadata_json = json_string(Dict("name" => target_filename, "parents" => [parent_folder_id]))
 
     body = IOBuffer()
     write(body, "--$boundary\r\n")
@@ -595,7 +595,7 @@ function upload_pdf(
     upload_headers = vcat(headers, ["Content-Type" => "multipart/related; boundary=$boundary"])
     resp = HTTP.post(url, upload_headers, take!(body))
 
-    uploaded_file = JSON.parse(String(resp.body))
+    uploaded_file = json_parse(String(resp.body))
     return String(uploaded_file["id"])
 end
 

@@ -62,7 +62,9 @@ Build one training sample as described in the NameReader plan:
 Handwriting crops (the 40pt training boxes) are smaller than the 55pt name
 field. They are centered horizontally, and the ink is sat on the printed
 baseline so names look written on the line rather than floating in the
-top-left. Small random shifts are applied after that.
+top-left. Small random shifts are applied after that, then clamped so
+black pixels stay on the canvas (the first letters of a name cannot be
+shifted off the left edge).
 """
 function compose_name_training_image(
     handwriting,
@@ -245,16 +247,45 @@ function handwriting_canvas_top(resized, target_height::Int, new_h::Int, align::
     align === :top && return 0
     align === :baseline || throw(ArgumentError("unknown name-canvas align: $(repr(align))"))
 
-    ink = vec(any(resized .< 0.5f0; dims=2))
-    ink_top = findfirst(ink)
-    ink_bottom = findlast(ink)
-    (ink_top === nothing || ink_bottom === nothing) && return div(target_height - new_h, 2)
+    bounds = ink_bounds(resized)
+    bounds === nothing && return div(target_height - new_h, 2)
+    ink_top, ink_bottom, _, _ = bounds
 
     baseline = clamp(round(Int, NAME_FIELD_BASELINE_FRAC * target_height), 1, target_height)
     # 0-based paste offset so source row `ink_bottom` lands on the printed line.
     # Whitespace may hang off the canvas; ink is kept on-canvas when it fits.
     top = baseline - ink_bottom
     return clamp(top, 1 - ink_top, target_height - ink_bottom)
+end
+
+"""
+Return `(top, bottom, left, right)` of pixels darker than `threshold`, or
+`nothing` if the image is blank.
+"""
+function ink_bounds(gray::AbstractMatrix; threshold::Float32=0.5f0)
+    ink_rows = vec(any(gray .< threshold; dims=2))
+    ink_cols = vec(any(gray .< threshold; dims=1))
+    top = findfirst(ink_rows)
+    bottom = findlast(ink_rows)
+    left = findfirst(ink_cols)
+    right = findlast(ink_cols)
+    (top === nothing || left === nothing) && return nothing
+    return (top, bottom, left, right)
+end
+
+"""
+Clamp a translation so dark pixels stay on-canvas. Positive `shift_x` moves
+ink right; positive `shift_y` moves ink down. Whitespace may hang off the
+edge; ink is kept on-canvas when it fits.
+"""
+function clamp_translation_to_ink(gray::AbstractMatrix, shift_y::Real, shift_x::Real)
+    bounds = ink_bounds(gray)
+    bounds === nothing && return Float64(shift_y), Float64(shift_x)
+    height, width = size(gray)
+    ink_top, ink_bottom, ink_left, ink_right = bounds
+    shift_y = clamp(Float64(shift_y), Float64(1 - ink_top), Float64(height - ink_bottom))
+    shift_x = clamp(Float64(shift_x), Float64(1 - ink_left), Float64(width - ink_right))
+    return shift_y, shift_x
 end
 
 function paste_into_canvas!(canvas, src; top::Int, left::Int)
@@ -319,6 +350,7 @@ function apply_random_affine_gray(
         shift_y = random_uniform(rng, -translation_y_percent * height, translation_y_percent * height)
         shift_x = random_uniform(rng, -translation_x_percent * width, translation_x_percent * width)
     end
+    shift_y, shift_x = clamp_translation_to_ink(gray, shift_y, shift_x)
 
     cos_theta = cos(rotation)
     sin_theta = sin(rotation)

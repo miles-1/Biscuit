@@ -78,32 +78,6 @@ function compile_feedback_bundle(;
     return nothing
 end
 
-function _normalize_json_types(x)
-    if isa(x, AbstractDict) || isa(x, Dict) || (isdefined(Main, :JSON3) && isa(x, JSON3.Object))
-        out = Dict{String, Any}()
-        for (k, v) in pairs(x)
-            out[String(k)] = _normalize_json_types(v)
-        end
-        return out
-    elseif isa(x, AbstractVector)
-        normalized = Any[_normalize_json_types(v) for v in x]
-        if all(v -> isa(v, Bool), normalized)
-            return Bool.(normalized)
-        elseif all(v -> isa(v, Integer), normalized)
-            return Int64.(normalized)
-        elseif all(v -> isa(v, Real) && isfinite(v) && isinteger(v), normalized)
-            return round.(Int64, normalized)
-        elseif all(v -> isa(v, AbstractFloat), normalized)
-            return Float64.(normalized)
-        elseif all(v -> isa(v, AbstractString), normalized)
-            return String.(normalized)
-        else
-            return normalized
-        end
-    end
-    return x
-end
-
 function _name_guess_for_assn(name_guesses, assn_id)::Union{Nothing, String}
     isa(name_guesses, AbstractDict) || return nothing
     raw = get(name_guesses, string(assn_id), get(name_guesses, assn_id, nothing))
@@ -124,7 +98,7 @@ function _read_file_from_temp(file_name::String; give_default::Bool=false)::Unio
         end
     end
     if endswith(lowercase(target_file), ".json")
-        return _normalize_json_types(JSON.parsefile(target_file))
+        return json_parsefile(target_file)
     elseif endswith(lowercase(target_file), ".csv")
         return CSV.read(target_file, NamedTuple)
     else
@@ -368,17 +342,24 @@ function _build_grading_data_from_archive()::Dict{Int64, Dict{String, Any}}
             return nothing
         end
         q_type = String(master_q["type"])
+        if q_type == "true_false"
+            @assert isa(master_ca, AbstractVector) "master correct answer for true_false question must be a vector, got $(typeof(master_ca))"
+            @assert all(_is_json_int, master_ca) "master correct answer for true_false question must be vector of integers, got $(typeof(master_ca))"
+            master_ca = _as_int64_vector(master_ca)
+        elseif q_type == "multiple_choice"
+            @assert isa(master_ca, Integer) || _is_json_int(master_ca) "master correct answer for multiple_choice question must be integer, got $(typeof(master_ca))"
+            master_ca = Int64(master_ca)
+        end
         perm = get(version_node, "option_permutation", nothing)
         if isnothing(perm) || !isa(perm, AbstractVector)
             return master_ca
         end
+        perm = Int64.(perm)
         if q_type == "multiple_choice"
-            @assert isa(master_ca, Integer) "master correct answer for multiple_choice question must be integer, got $(typeof(master_ca))"
             pos = findfirst(==(master_ca), perm)
             @assert !isnothing(pos) "correct answer index missing from permutation"
             return pos - 1 # convert to zero-indexing
         elseif q_type == "true_false"
-            @assert isa(master_ca, AbstractVector{Int64}) "master correct answer for true_false question must be vector of integers, got $(typeof(master_ca))"
             master_true = Set(master_ca)
             adjusted = Int64[]
             for (i, orig_indx) in enumerate(perm)
@@ -728,7 +709,7 @@ end
 
 function detailed_scores_csv_path(archive_path::AbstractString)::String
     stem = first(splitext(basename(archive_path)))
-    return joinpath(dirname(archive_path), "$(stem)_detailed_scores.csv")
+    return joinpath(dirname(archive_path), "$(stem)_scores_detailed.csv")
 end
 
 function scores_csv_path(archive_path::AbstractString)::String
@@ -736,7 +717,7 @@ function scores_csv_path(archive_path::AbstractString)::String
     return joinpath(dirname(archive_path), "$(stem)_scores.csv")
 end
 
-# Write `_detailed_scores.csv` and `_scores.csv` next to the loaded .assn archive.
+# Write `_scores_detailed.csv` and `_scores.csv` next to the loaded .assn archive.
 # Returns (detailed_path, scores_path).
 function export_score_csvs(;
     grading_data::Dict,
@@ -1044,7 +1025,7 @@ end
 
 function _json_cache_key(obj)::String
     buf = IOBuffer()
-    JSON.print(buf, obj)
+    json_print(buf, obj)
     return string(hash(String(take!(buf))), base=16)
 end
 
