@@ -998,6 +998,21 @@ function _rel_under(root::String, path::String)::String
     return replace(relpath(abspath(path), abspath(root)), "\\" => "/")
 end
 
+function _cleanup_builder_preview_dir!()::Nothing
+    preview_dir = get(STATE, "preview_dir", nothing)
+    if isa(preview_dir, AbstractString) && isdir(preview_dir)
+        try
+            rm(preview_dir; force=true, recursive=true)
+        catch
+        end
+    end
+    STATE["preview_dir"] = nothing
+    STATE["preview_work_dir"] = nothing
+    STATE["preview_id"] = nothing
+    STATE["question_preview_hash"] = nothing
+    return nothing
+end
+
 function _ensure_builder_preview_dir!(; source_path=nothing)::Tuple{String,String,String}
     work_dir = _preview_work_dir(source_path)
     preview_dir = get(STATE, "preview_dir", nothing)

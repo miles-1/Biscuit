@@ -60,7 +60,7 @@ function renderClassesTable(classes) {
     if (!classes.length) {
         const tr = document.createElement('tr');
         const td = document.createElement('td');
-        td.colSpan = 6;
+        td.colSpan = 7;
         td.textContent = 'No classes yet. Add one below.';
         td.style.color = 'var(--text-muted)';
         tr.appendChild(td);
@@ -79,6 +79,7 @@ function renderClassesTable(classes) {
             String(cls.num_students ?? 0),
             cls.has_student_id ? 'Yes' : 'No',
             cls.has_student_email ? 'Yes' : 'No',
+            cls.has_namereader ? 'Yes' : 'No',
             formatLastEdited(cls.last_edited),
         ];
         for (const text of cells) {
@@ -91,7 +92,7 @@ function renderClassesTable(classes) {
         actions.className = 'classes-row-actions';
         const deleteBtn = document.createElement('button');
         deleteBtn.type = 'button';
-        deleteBtn.textContent = 'Delete';
+        deleteBtn.textContent = 'x';
         deleteBtn.addEventListener('click', (e) => {
             e.stopPropagation();
             deleteClassPrompt(name);

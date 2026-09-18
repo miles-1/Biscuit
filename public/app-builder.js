@@ -722,6 +722,14 @@ function renderAddQuestionButtonHtml(key, isInsideBank, sIdx, bIdx) {
     `;
 }
 
+function formatBuilderQuestionId(sIdx, bIdx, qIdx) {
+    const parts = [];
+    if (sIdx !== null && sIdx !== undefined && sIdx !== '') parts.push(Number(sIdx));
+    if (bIdx !== null && bIdx !== undefined && bIdx !== '') parts.push(Number(bIdx));
+    parts.push(Number(qIdx));
+    return 'q' + parts.join('.');
+}
+
 function renderQuestionCardHtml(q, qIdx, isInsideBank, sIdx, bIdx) {
     const typeNames = {
         multiple_choice: 'Multiple Choice',
@@ -743,7 +751,7 @@ function renderQuestionCardHtml(q, qIdx, isInsideBank, sIdx, bIdx) {
         <div class="builder-question-card" data-q-preview="1" data-s-idx="${sIdx === null || sIdx === undefined ? '' : sIdx}" data-b-idx="${bIdx === null || bIdx === undefined ? '' : bIdx}" data-q-idx="${qIdx}">
             <div class="builder-question-header">
                 <div class="builder-q-badge-wrap">
-                    <span class="builder-q-num">Q${qIdx + 1}</span>
+                    <span class="builder-q-num">${formatBuilderQuestionId(sIdx, bIdx, qIdx)}</span>
                     <span class="builder-type-badge ${badgeClass}">${typeLabel}</span>
                 </div>
                 <div class="builder-points-row">
@@ -1711,6 +1719,15 @@ async function confirmSaveMaster() {
 
 function closeMasterBuilder() {
     showSection('generate-sec');
+}
+
+function cleanupBuilderPreviewOnLeave() {
+    builderState.previewId = null;
+    builderState.previewPages = [];
+    builderState.previewKind = 'none';
+    builderState.questionPreviewId = null;
+    builderState.questionPreviewHash = null;
+    fetch('/api/cleanup_builder_preview', { method: 'POST' }).catch(() => {});
 }
 
 async function loadMasterJSONFromPath(path) {

@@ -225,6 +225,7 @@ if (document.readyState === 'loading') {
 // General functions
 
 function showSection(id) {
+    const leavingBuilder = builderSection && !builderSection.classList.contains('hidden') && id !== 'builder-sec';
     if (id !== 'generate-sec' && activeGenerateSocket && activeGenerateSocket.readyState <= WebSocket.OPEN) {
         activeGenerateSocket.close(1000, "Leaving generate section");
     }
@@ -259,6 +260,9 @@ function showSection(id) {
     if (id === 'namereader-sec') {
         refreshNameReaderClassInfo();
     }
+    if (leavingBuilder && typeof cleanupBuilderPreviewOnLeave === 'function') {
+        cleanupBuilderPreviewOnLeave();
+    }
 }
 
 window.addEventListener('beforeunload', () => {
@@ -267,6 +271,9 @@ window.addEventListener('beforeunload', () => {
     }
     if (activeProcessSocket && activeProcessSocket.readyState <= WebSocket.OPEN) {
         activeProcessSocket.close(1000, "Page unloading");
+    }
+    if (builderSection && !builderSection.classList.contains('hidden')) {
+        try { navigator.sendBeacon('/api/cleanup_builder_preview'); } catch (_) {}
     }
 });
 

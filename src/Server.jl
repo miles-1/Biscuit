@@ -46,12 +46,9 @@ atexit() do
         end
     end
 
-    preview_dir = get(STATE, "preview_dir", nothing)
-    if isa(preview_dir, String) && isdir(preview_dir)
-        try
-            rm(preview_dir; force=true, recursive=true)
-        catch
-        end
+    try
+        _cleanup_builder_preview_dir!()
+    catch
     end
 
     pid_file = get(STATE, "pid_file", nothing)

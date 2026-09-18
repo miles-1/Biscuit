@@ -510,7 +510,11 @@ end
 
 @get "/api/classes" function(req::HTTP.Request)
     try
-        return Dict("status" => "success", "classes" => list_classes())
+        classes = list_classes()
+        for cls in classes
+            cls["has_namereader"] = class_namereader_for_guessing(get(cls, "class_name", nothing)) !== nothing
+        end
+        return Dict("status" => "success", "classes" => classes)
     catch e
         return Dict("status" => "error", "message" => "Failed to list classes: $e")
     end
@@ -1048,6 +1052,11 @@ end
         msg = replace(msg, r"^ArgumentError:\s*" => "")
         return Dict("status" => "error", "message" => msg)
     end
+end
+
+@post "/api/cleanup_builder_preview" function(req::HTTP.Request)
+    _cleanup_builder_preview_dir!()
+    return Dict("status" => "success")
 end
 
 @post "/api/preview_master_json" function(req::HTTP.Request)

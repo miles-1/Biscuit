@@ -524,6 +524,7 @@ button:disabled { opacity: 0.55; cursor: default; }
 }
 .classes-row-actions button {
     margin-right: 0;
+    padding: 5px 9px;
 }
 .classes-modal-status {
     min-height: 1.2em;
@@ -949,6 +950,7 @@ input[type="number"].score-input {
 .typst-highlight-wrap {
     display: grid;
     min-width: 0;
+    overflow-x: hidden;
 }
 .typst-highlight-wrap.is-textarea {
     width: 100%;
@@ -1003,7 +1005,8 @@ input[type="number"].score-input {
 }
 .typst-highlight-wrap.is-textarea .typst-highlight-field {
     resize: vertical;
-    overflow: auto;
+    overflow-x: hidden;
+    overflow-y: auto;
 }
 .typst-highlight-wrap.is-textarea .feedback-input {
     resize: none;
@@ -1169,14 +1172,19 @@ hr { border: none; border-top: 1px solid var(--border); }
     position: absolute;
     right: 8px;
     top: 50%;
-    transform: translateY(-50%);
     width: 13px;
     height: 13px;
     border: 2px solid var(--spinner-track);
     border-top-color: var(--spinner-head);
     border-radius: 50%;
-    animation: spin 0.8s linear infinite;
+    /* Keep translateY in the keyframes so the spin animation does not overwrite
+       vertical centering and make the disc bounce. */
+    animation: input-spin 0.8s linear infinite;
     pointer-events: none;
+}
+@keyframes input-spin {
+    from { transform: translateY(-50%) rotate(0deg); }
+    to { transform: translateY(-50%) rotate(360deg); }
 }
 .input-status-icon {
     position: absolute;
@@ -1344,6 +1352,7 @@ hr { border: none; border-top: 1px solid var(--border); }
 .builder-right-pane {
     padding: 18px 24px;
     background: var(--bg-elevated);
+    overflow-x: hidden;
     overflow-y: auto;
 }
 
@@ -1354,6 +1363,8 @@ hr { border: none; border-top: 1px solid var(--border); }
     padding: 18px;
     margin-bottom: 18px;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+    min-width: 0;
+    overflow-x: hidden;
 }
 .builder-top-settings {
     border-top: 4px solid var(--menu-btn-num);
@@ -1398,6 +1409,8 @@ hr { border: none; border-top: 1px solid var(--border); }
     display: flex;
     flex-direction: column;
     margin-bottom: 12px;
+    min-width: 0;
+    overflow-x: hidden;
 }
 .builder-field-block > label {
     display: block;
@@ -1571,6 +1584,8 @@ hr { border: none; border-top: 1px solid var(--border); }
     padding: 14px;
     margin-bottom: 16px;
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05);
+    min-width: 0;
+    overflow-x: hidden;
 }
 .builder-section-header {
     display: flex;
@@ -1608,6 +1623,8 @@ hr { border: none; border-top: 1px solid var(--border); }
     padding: 14px;
     margin-bottom: 14px;
     background: var(--bg-hover);
+    min-width: 0;
+    overflow-x: hidden;
 }
 .builder-bank-header {
     display: flex;
@@ -1628,6 +1645,8 @@ hr { border: none; border-top: 1px solid var(--border); }
     padding: 14px;
     margin-bottom: 12px;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+    min-width: 0;
+    overflow-x: hidden;
 }
 .builder-question-header {
     display: flex;
@@ -1911,6 +1930,8 @@ hr { border: none; border-top: 1px solid var(--border); }
     display: flex;
     align-items: center;
     gap: 8px;
+    min-width: 0;
+    overflow-x: hidden;
 }
 .builder-option-letter {
     font-weight: 700;
