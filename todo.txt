@@ -1,31 +1,31 @@
 - [ ] moving to Use Sections (or back?) can preserve questions written thus far
 - [ ] user does not call close on web socket
-- [ ] names that are not matched can still be uploaded to drive just no sharing
-- [ ] allow delete page of scan
-- [ ] warn if going away from verify scan changes for page w/o saving
-- [ ] don't allow any up/down arrow scrolling for input fields
 - [ ] When changing between questions, assn stays the same where possible (skip question when a certain assignment doesn't have it)
 - [ ] make sure to delete temp folders from julia and from archives
-- [ ] hitting home shows "save?" button
 - [ ] slide window resize between left and right
 - [ ] ability to copy notes from other file
 - [ ] make better randomizer to fill pages - get q heights by query
 - [ ] Make preview show normal preview or something
 - [ ] export two things: key and folder-of-versions/single-export. Option to not export key.
-- [ ] if feedback is just whitespace, don't render
 - [ ] caffeinate on train
-- [ ] Get rid of name guess csv or whatever, just put it in the gradingData thing
 - [ ] original images 14.1 MB, annotated are 110.7 MB
-- [ ] Fix double message: "Stop requested; finishing this epoch and saving…
-                           epoch= 6/40 loss=0.5261 first_guess_correct=0.9689 correct_within_3_guesses=0.9850
-                           Stop requested; finishing this epoch and saving.
-                           Stopping early after epoch 6/40; saving the current model."
 
 SKIPPED
 - [ ] Section name not exactly copied
 - [ ] get rid of "choose one option"?
 
 COMPLETED, UNTESTED
+- [x] if feedback is just whitespace, don't render
+- [x] hitting home shows "save?" button
+- [x] Get rid of name guess csv or whatever, just put it in the gradingData thing
+- [x] Fix double message: "Stop requested; finishing this epoch and saving…
+                           epoch= 6/40 loss=0.5261 first_guess_correct=0.9689 correct_within_3_guesses=0.9850
+                           Stop requested; finishing this epoch and saving.
+                           Stopping early after epoch 6/40; saving the current model."
+- [x] names that are not matched can still be uploaded to drive just no sharing
+- [x] don't allow any up/down scrolling for input fields
+- [x] allow delete page of scan
+- [x] warn if going away from verify scan changes for page w/o saving
 - [x] remove flickering horizontal scroll bars in assignment builder (AB)
 - [x] Loading symbol moves down instead of rotating in create assn
 - [x] question IDs are wrong in assn builder

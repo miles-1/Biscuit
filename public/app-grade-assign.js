@@ -36,6 +36,7 @@ async function startGrading() {
             });
             return;
         }
+        archiveSessionOpen = true;
         gradingData = setupData.grading_data || {};
         migrateGradingDataScoreFields(gradingData);
         bustScanImageCache();

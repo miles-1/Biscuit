@@ -17,6 +17,33 @@ const Points2F64 = Vector{NTuple{2,Float64}}
 const pdf_width = 612
 const pdf_height = 792
 
+function _page_correction(corrections::AbstractDict, ppage_indx::Integer)
+    c = get(corrections, string(ppage_indx), nothing)
+    return isa(c, AbstractDict) ? c : nothing
+end
+
+function _correction_deletes_page(c)::Bool
+    return c !== nothing && get(c, "delete", false) === true
+end
+
+function _correction_rotates_page(c)::Bool
+    return c !== nothing && get(c, "rotate_180", false) === true
+end
+
+function rotate_page_180(image_3d::AbstractArray)
+    return image_3d[:, end:-1:1, end:-1:1]
+end
+
+function rotate_points_180(points, w::Real, h::Real)
+    return [(Float64(w) - Float64(p[1]), Float64(h) - Float64(p[2])) for p in points]
+end
+
+function maybe_corrected_page(image_3d, corrections::AbstractDict, ppage_indx::Integer)
+    c = _page_correction(corrections, ppage_indx)
+    _correction_deletes_page(c) && return nothing
+    return _correction_rotates_page(c) ? rotate_page_180(image_3d) : image_3d
+end
+
 function perspective_transform_points(points, H)::Points2F64
     if isempty(points)
         return Points2F64()
@@ -174,19 +201,30 @@ function extract_tiff_data(
     pages = load_binary_pages(scan)
     for (ppage_indx, image_3d) in enumerate(pages)
         println("- Page $ppage_indx...")
+        c = _page_correction(corrections, ppage_indx)
+        if _correction_deletes_page(c)
+            println(" "^4 * "Deleted in Verify Scans — skipping.")
+            continue
+        end
+        if _correction_rotates_page(c)
+            image_3d = rotate_page_180(image_3d)
+            println(" "^4 * "Rotated 180°")
+        end
         w, h = Int64(size(image_3d, 2)), Int64(size(image_3d, 3))
 
-        c = get(corrections, string(ppage_indx), nothing)
-        dm_data = if isnothing(c)
+        dm_data = if isnothing(c) || !haskey(c, "assn_id")
             find_data_matrix(image_3d)
         else
             @assert haskey(c, "assn_id") "correction for page $ppage_indx missing assn_id"
             (; assn_id=Int64(c["assn_id"]), page=Int64(c["page"]))
         end
 
-        tiff_anchors = !isnothing(c) && haskey(c, "tiff_anchors") ?
-            [Tuple(Float64.(a)) for a in c["tiff_anchors"]] :
+        tiff_anchors = if !isnothing(c) && haskey(c, "tiff_anchors")
+            pts = [Tuple(Float64.(a)) for a in c["tiff_anchors"]]
+            _correction_rotates_page(c) ? rotate_points_180(pts, w, h) : pts
+        else
             find_anchor_squares(image_3d)
+        end
         if isempty(dm_data)
             identify_issues[ppage_indx] = Dict{String, Any}(
                 "identify_error" => "no_datamatrix",
@@ -347,12 +385,15 @@ function get_question_info_by_assn(
     mapped_data::Dict{Int64, Dict{Int64, NamedTuple}},
     page_elements_data,
     ppage_dict::Dict{Int64, NTuple{2, Int64}},
+    corrections::Dict{String, Any}=Dict{String, Any}(),
 )::Dict{Int64, Vector{NamedTuple}}
     pages = load_binary_pages(scan)
     assn_data = Dict{Int64, Vector{NamedTuple}}()
     printstyled("Collecting Mapped Page Elements\n"; bold=true, underline=true)
     for (ppage_indx, image_3d) in enumerate(pages)
         if !haskey(ppage_dict, ppage_indx) continue end
+        image_3d = maybe_corrected_page(image_3d, corrections, ppage_indx)
+        image_3d === nothing && continue
         println("- Page $ppage_indx")
         (assn_id, page) = ppage_dict[ppage_indx]
         mapped_nt = get(get(mapped_data, assn_id, Dict{Int64, NamedTuple}()), page, nothing)
@@ -619,6 +660,7 @@ function generate_marked_tiffs(
     processed_assn_data::Dict{Int64, Dict{String, Any}},
     output_dir::String,
     identify_issues::Dict{Int64, Dict{String, Any}}=Dict{Int64, Dict{String, Any}}(),
+    corrections::Dict{String, Any}=Dict{String, Any}(),
 )::Nothing
     scan_results = Dict{String, Any}[]
     pages = load_color_pages(scan)
@@ -636,6 +678,8 @@ function generate_marked_tiffs(
     unidentified_frames = Tuple{Int64, AbstractArray{UInt8, 3}}[]
     seen_assn = Set{Int64}()
     for (ppage_indx, frame_cv) in enumerate(pages)
+        frame_cv = maybe_corrected_page(frame_cv, corrections, ppage_indx)
+        frame_cv === nothing && continue
         w, h = size(frame_cv, 2), size(frame_cv, 3)
         page_info = Dict{String, Any}(
             "ppage_indx" => ppage_indx,
@@ -821,6 +865,7 @@ function snapshot_name_crops(;
     processed_assn_data::Dict{Int64, Dict{String, Any}},
     ppage_dict::Dict{Int64, NTuple{2, Int64}},
     archive_dir::String,
+    corrections::Dict{String, Any}=Dict{String, Any}(),
 )::Union{String, Nothing}
     wanted = NamedTuple[]
     for assn_id in sort!(collect(keys(processed_assn_data)))
@@ -848,7 +893,8 @@ function snapshot_name_crops(;
             group === nothing && continue
             ppage = get(ppage_of, (item.assn_id, group.page), nothing)
             (ppage === nothing || ppage < 1 || ppage > length(pages)) && continue
-            page_image = pages[ppage]
+            page_image = maybe_corrected_page(pages[ppage], corrections, ppage)
+            page_image === nothing && continue
             is_table = subdir == NAME_TABLE_CROPS_SUBDIR
             width = is_table ? NAME_BOX_WARP_WIDTH : NAME_FIELD_WARP_WIDTH
             height = is_table ? NAME_BOX_WARP_HEIGHT : NAME_FIELD_WARP_HEIGHT
@@ -1032,10 +1078,10 @@ function process_scans(
             page_elements_data = load_page_elements_data(page_elements_file)
             tiff_data, ppage_dict, identify_issues = extract_tiff_data(scan; corrections, page_elements_data)
             mapped_data = get_mapped_data(; tiff_data, page_elements_data)
-            assn_data = get_question_info_by_assn(scan; mapped_data, page_elements_data, ppage_dict)
+            assn_data = get_question_info_by_assn(scan; mapped_data, page_elements_data, ppage_dict, corrections)
             processed_assn_data = process_assn_data(assn_data; mapped_data, output_dir=archive_dir)
             # Snapshot before annotation: the marks drawn below would otherwise land in the crops.
-            snapshot_name_crops(; scan, processed_assn_data, ppage_dict, archive_dir)
+            snapshot_name_crops(; scan, processed_assn_data, ppage_dict, archive_dir, corrections)
             if namereader_file !== nothing && !isempty(strip(String(namereader_file)))
                 apply_name_reader_guesses!(
                     processed_assn_data;
@@ -1044,9 +1090,10 @@ function process_scans(
                     mapped_data,
                     archive_dir,
                     namereader_file=String(namereader_file),
+                    corrections,
                 )
             end
-            generate_marked_tiffs(scan; ppage_dict, tiff_data, mapped_data, processed_assn_data, output_dir=annotated_dir, identify_issues)
+            generate_marked_tiffs(scan; ppage_dict, tiff_data, mapped_data, processed_assn_data, output_dir=annotated_dir, identify_issues, corrections)
             make_archive_from_dir(archive_dir, assn_archive_file)
             println("Updated: $assn_archive_file (added processed_assn_data.json and annotated scans)")
             stale_tmp = abspath(assn_archive_file) * ".tmp"
@@ -1402,6 +1449,7 @@ function apply_name_reader_guesses!(
     mapped_data,
     archive_dir::String,
     namereader_file::String,
+    corrections::Dict{String, Any}=Dict{String, Any}(),
 )
     isfile(namereader_file) || throw(ArgumentError("`.namereader` file not found: $namereader_file"))
     bundle = load_name_reader(namereader_file)
@@ -1410,7 +1458,13 @@ function apply_name_reader_guesses!(
         page_of[(assn_id, page)] = ppage
     end
 
-    extracted = extract_name_field_crops(scan, processed_assn_data; ppage_of=page_of)
+    pages = load_binary_pages(scan)
+    for i in eachindex(pages)
+        rotated = maybe_corrected_page(pages[i], corrections, i)
+        rotated === nothing && continue
+        pages[i] = rotated
+    end
+    extracted = extract_name_field_crops(pages, processed_assn_data; ppage_of=page_of)
     if isempty(extracted)
         println("NameReader: no name-field crops found (assignments need the Typst name-line marks).")
         return processed_assn_data
@@ -1419,20 +1473,21 @@ function apply_name_reader_guesses!(
     crops = [item.crop for item in extracted]
     roster = _archive_roster_names(archive_dir)
     guesses = guess_assignment_names(bundle, crops; roster=roster, allow_unassigned=true)
-    name_guesses = Dict{String, String}()
     assigned = 0
     for guess in guesses
         assn_id = extracted[guess.index].assn_id
-        if guess.label !== nothing
-            name_guesses[string(assn_id)] = match_label_to_roster(guess.label, roster)
-            assigned += 1
-        end
+        guess.label === nothing && continue
+        entry = _processed_assn_entry(processed_assn_data, assn_id)
+        entry === nothing && continue
+        entry["name"] = match_label_to_roster(guess.label, roster)
+        entry["name_guessed"] = true
+        assigned += 1
     end
-    guess_path = joinpath(archive_dir, "name_guesses.json")
-    open(guess_path, "w") do f
-        json_print(f, name_guesses)
+    processed_path = joinpath(archive_dir, "processed_assn_data.json")
+    open(processed_path, "w") do f
+        json_print(f, processed_assn_data)
     end
-    println("NameReader: guessed $assigned / $(length(crops)) name(s); wrote name_guesses.json")
+    println("NameReader: guessed $assigned / $(length(crops)) name(s)")
     return processed_assn_data
 end
 

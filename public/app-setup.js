@@ -25,7 +25,7 @@ const WORKFLOW_STEP_TOOLTIPS = {
 
 const WORKFLOW_BUTTON_TOOLTIPS = {
     1: 'Create or upload a master file (`.json`) that contains assignment information. From this, build randomized assignment `.pdf`s and supporting files.\n - #namereader When creating the assignment, you can include a question where students will hand-write their names multiple times to be used for identifying their names on future assignments.\nOptionally select a class so its roster (a `.csv` file) is bundled into the archive.\n - #canvas If the roster has an `ID` header, the final grades `.csv` export can be used to import those scores into Canvas.\n - #drive If the roster has an `Email` header, the feedback `.pdf`s can be exported to a per-student Google Drive folder (read-only) automatically shared with them.',
-    2: 'Read scanned pages, locate bubbles/anchors, and build a `.assn` file that is used for grading.\n - #usenamereader With "Guess student names" checked, the name reader trained for this assignment\'s class guesses names from the name line and stores them as `name_guesses.json` in the `.assn` file. These should be manually verified.',
+    2: 'Read scanned pages, locate bubbles/anchors, and build a `.assn` file that is used for grading.\n - #usenamereader With "Guess student names" checked, the name reader trained for this assignment\'s class guesses names from the name line and stores them on each assignment in grading data. These should be manually verified.',
     3: 'Assign student names and enter/review grades for each question. Produce feedback files and score spreadsheets.\n - #namereader Finish & Export also files this assignment\'s handwriting samples under the class, ready for step [4].',
     4: '#namereader Train or fine-tune a name-reading neural network for a class, so names on future assignments can be guessed instead of typed.',
 };
@@ -226,6 +226,12 @@ if (document.readyState === 'loading') {
 
 function showSection(id) {
     const leavingBuilder = builderSection && !builderSection.classList.contains('hidden') && id !== 'builder-sec';
+    const verifySectionEl = document.getElementById('verify-sec');
+    const leavingVerify = verifySectionEl && !verifySectionEl.classList.contains('hidden') && id !== 'verify-sec';
+    if (leavingVerify && !skipVerifyLeaveConfirm && typeof confirmLeaveVerifyScans === 'function') {
+        if (!confirmLeaveVerifyScans()) return;
+    }
+    skipVerifyLeaveConfirm = false;
     if (id !== 'generate-sec' && activeGenerateSocket && activeGenerateSocket.readyState <= WebSocket.OPEN) {
         activeGenerateSocket.close(1000, "Leaving generate section");
     }
@@ -841,13 +847,6 @@ function stopNameReaderTraining() {
     setNameReaderTrainingUi(true, true);
     const save = nrCanSave;
     activeTrainSocket.send(JSON.stringify(save ? { stop: true } : { cancel: true }));
-    const out = document.getElementById('nr-output');
-    if (out) {
-        out.textContent += save
-            ? "Stop requested; finishing this epoch and saving…\n"
-            : "Cancel requested; stopping without saving…\n";
-        out.scrollTop = out.scrollHeight;
-    }
 }
 
 function trainNameReader(fineTune) {

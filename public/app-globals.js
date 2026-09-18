@@ -47,6 +47,10 @@ let gradingData = {};
 // navigated away before images finished loading) can detect they are stale and do nothing.
 let scanRenderToken = 0;
 let scanCacheBust = Date.now();
+// True while an extracted `.assn.tmp` session is loaded (grading or verify).
+let archiveSessionOpen = false;
+// Skip Verify's leave-confirm when Home already asked "Go home without saving?"
+let skipVerifyLeaveConfirm = false;
 
 function bustScanImageCache() {
     scanCacheBust = Date.now();
@@ -100,6 +104,14 @@ function initTheme() {
 }
 
 initTheme();
+
+// Number inputs change value on mouse-wheel; disable that everywhere.
+document.addEventListener('wheel', (event) => {
+    const t = event.target;
+    if (!(t instanceof Element)) return;
+    if (!t.closest('input[type="number"]')) return;
+    event.preventDefault();
+}, { passive: false, capture: true });
 
 // Shared message modal (replaces browser alert)
 function closeMessageModal() {

@@ -609,20 +609,44 @@ Returns a NamedTuple with `status` one of:
 - `:no_match` — no roster name matched the PDF stem
 """
 function find_student_for_pdf_stem(students_table, pdf_stem::String)
-    if !students_table_has_email(students_table) || !haskey(students_table, :Student)
+    if students_table === nothing || !haskey(students_table, :Student)
         return (status=:no_match, name=nothing, email=nothing)
     end
-    for (name, email) in zip(students_table.Student, students_table.Email)
+    emails = students_table_has_email(students_table) ? students_table.Email : nothing
+    for (i, name) in enumerate(students_table.Student)
         name_str = String(name)
-        if sanitize_student_name(name_str) == pdf_stem
-            email_str = _cell_string(email)
-            if email_str === nothing
-                return (status=:no_email, name=name_str, email=nothing)
-            end
-            return (status=:ok, name=name_str, email=email_str)
+        sanitize_student_name(name_str) == pdf_stem || continue
+        email_str = emails === nothing ? nothing : _cell_string(emails[i])
+        if email_str === nothing
+            return (status=:no_email, name=name_str, email=nothing)
         end
+        return (status=:ok, name=name_str, email=email_str)
     end
     return (status=:no_match, name=nothing, email=nothing)
+end
+
+"""
+Invert `sanitize_student_name` enough to build a Drive folder label from a PDF stem.
+`"smith_john"` → `"smith, john"`; otherwise the stem is used as-is.
+"""
+function _name_from_pdf_stem(pdf_stem::AbstractString)::String
+    s = String(pdf_stem)
+    if occursin('_', s) && !occursin(',', s)
+        return replace(s, "_" => ", "; count=1)
+    end
+    return s
+end
+
+"""
+Roster match, or a synthetic name from the PDF stem when the assignment name is not on the roster.
+`email` is `nothing` when the folder should be uploaded unshared.
+"""
+function _pdf_upload_identity(students_table, pdf_stem::String)
+    student = find_student_for_pdf_stem(students_table, pdf_stem)
+    if student.status === :ok || student.status === :no_email
+        return student
+    end
+    return (status=:no_match, name=_name_from_pdf_stem(pdf_stem), email=nothing)
 end
 
 """
@@ -653,7 +677,7 @@ function ensure_student_type_folder(
     class_folder_id::String,
     class_name::AbstractString,
     student_roster_name::AbstractString,
-    recipient_email::AbstractString,
+    recipient_email::Union{AbstractString, Nothing},
     assn_type::AbstractString,
 )::Tuple{String, String}
     type_folder = drive_folder_for_assn_type(assn_type)
@@ -661,8 +685,13 @@ function ensure_student_type_folder(
     student_id, student_created = ensure_folder(headers, student_folder; parent_id=class_folder_id)
     if student_created
         println("Created folder: $student_folder")
-        share_item(headers, student_id, recipient_email, role="reader")
-        println("Shared folder $student_folder with $recipient_email")
+        email = recipient_email === nothing ? nothing : _cell_string(recipient_email)
+        if email !== nothing
+            share_item(headers, student_id, email, role="reader")
+            println("Shared folder $student_folder with $email")
+        else
+            println("Skipping share for $student_folder (no email)")
+        end
     end
     type_id, type_created = ensure_folder(headers, type_folder; parent_id=student_id)
     if type_created
@@ -701,7 +730,7 @@ function process_and_upload_pdf(
     local_file_path::AbstractString,
     assn_type::AbstractString,
     assn_name::AbstractString,
-    recipient_email::AbstractString,
+    recipient_email::Union{AbstractString, Nothing},
     student_roster_name::AbstractString,
     duplicate_policy::AbstractString,
 )
@@ -755,8 +784,6 @@ function preview_drive_upload_conflicts(
     isdir(feedback_dir) || throw(ArgumentError("feedback directory not found: $feedback_dir"))
     google_drive_credentials_linked(token_path) ||
         throw(ArgumentError("Google Drive credentials file not found: $token_path"))
-    students_table_has_email(students_table) ||
-        throw(ArgumentError("Class roster CSV must include an `Email` column for Google Drive upload"))
     isempty(strip(class_name)) && throw(ArgumentError("`class_name` is required for Google Drive upload"))
 
     access_token = get_access_token(token_path)
@@ -767,17 +794,10 @@ function preview_drive_upload_conflicts(
     pdf_files = sort(filter(f -> endswith(lowercase(f), ".pdf"), readdir(feedback_dir)))
     conflicts = Any[]
     uploadable = 0
-    skipped_no_email = 0
 
     for pdf_name in pdf_files
         pdf_stem = first(splitext(pdf_name))
-        student = find_student_for_pdf_stem(students_table, pdf_stem)
-        if student.status === :no_email
-            skipped_no_email += 1
-            continue
-        elseif student.status === :no_match
-            continue
-        end
+        student = _pdf_upload_identity(students_table, pdf_stem)
         uploadable += 1
         student_folder = student_feedback_folder_name(class_name, student.name)
         student_id = get_folder_id(headers, student_folder; parent_id=class_folder_id)
@@ -800,7 +820,7 @@ function preview_drive_upload_conflicts(
         "conflicts" => conflicts,
         "conflict_count" => length(conflicts),
         "uploadable_count" => uploadable,
-        "skipped_no_email_count" => skipped_no_email,
+        "skipped_no_email_count" => 0,
         "target_filename" => target_filename,
         "class_name" => class_name,
         "assn_type" => assn_type,
@@ -826,8 +846,6 @@ function upload_feedback_pdfs(
     isdir(feedback_dir) || throw(ArgumentError("feedback directory not found: $feedback_dir"))
     google_drive_credentials_linked(token_path) ||
         throw(ArgumentError("Google Drive credentials file not found: $token_path"))
-    students_table_has_email(students_table) ||
-        throw(ArgumentError("Class roster CSV must include an `Email` column for Google Drive upload"))
     isempty(strip(class_name)) && throw(ArgumentError("`class_name` is required for Google Drive upload"))
 
     access_token = get_access_token(token_path)
@@ -845,18 +863,7 @@ function upload_feedback_pdfs(
         local_path = joinpath(feedback_dir, pdf_name)
         pdf_stem = first(splitext(pdf_name))
         try
-            student = find_student_for_pdf_stem(students_table, pdf_stem)
-            if student.status === :no_email
-                push!(skipped_no_email, Dict(
-                    "file" => pdf_name,
-                    "name" => student.name,
-                ))
-                continue
-            elseif student.status === :no_match
-                throw(ErrorException(
-                    "No class roster row matches sanitized name $(repr(pdf_stem))"
-                ))
-            end
+            student = _pdf_upload_identity(students_table, pdf_stem)
             result = process_and_upload_pdf(
                 headers,
                 class_folder_id,

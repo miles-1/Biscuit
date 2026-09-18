@@ -2,8 +2,57 @@ let verifyScanResults = [];
 let currentVerifyIndex = 0;
 let verifyCorrections = {};
 let verifyAnchors = [];
+let verifyFlip180 = false;
+let verifyDirtyBaseline = null;
 
 const VERIFY_MIN_ANCHORS = 4;
+
+function resetVerifySessionState() {
+    verifyScanResults = [];
+    verifyCorrections = {};
+    verifyAnchors = [];
+    verifyFlip180 = false;
+    verifyDirtyBaseline = null;
+    currentVerifyIndex = 0;
+}
+
+function currentVerifyDraft() {
+    const assn = document.getElementById('verify-assn-id');
+    const pageNum = document.getElementById('verify-page-num');
+    return JSON.stringify({
+        assn_id: assn ? assn.value : '',
+        page: pageNum ? pageNum.value : '',
+        anchors: verifyAnchors,
+        rotate_180: !!verifyFlip180,
+    });
+}
+
+function captureVerifyDirtyBaseline() {
+    verifyDirtyBaseline = currentVerifyDraft();
+}
+
+function verifyPageIsDirty() {
+    if (verifyScanResults.length === 0 || verifyDirtyBaseline === null) return false;
+    return currentVerifyDraft() !== verifyDirtyBaseline;
+}
+
+function confirmSaveDirtyVerifyPage() {
+    if (!verifyPageIsDirty()) return true;
+    if (!confirm('This page has unsaved changes. Save them?')) return false;
+    return saveVerifyCorrection();
+}
+
+function confirmLeaveVerifyScans() {
+    if (!confirmSaveDirtyVerifyPage()) return false;
+    if (Object.keys(verifyCorrections).length > 0) {
+        if (!confirm('You have page corrections that have not been finalized. Leave without applying them?')) {
+            return false;
+        }
+    }
+    resetVerifySessionState();
+    clearArchiveContext();
+    return true;
+}
 
 // Entry point when clicking "Verify Scans"
 async function startVerifyScans() {
@@ -36,6 +85,7 @@ async function startVerifyScans() {
         if (data.status !== 'success') {
             throw new Error(data.message);
         }
+        archiveSessionOpen = true;
         bustScanImageCache();
 
         // Now fetch scan results
@@ -47,6 +97,9 @@ async function startVerifyScans() {
 
         verifyScanResults = scanData.scan_results || [];
         verifyCorrections = {};
+        verifyAnchors = [];
+        verifyFlip180 = false;
+        verifyDirtyBaseline = null;
         currentVerifyIndex = 0;
         
         populateVerifyDropdown();
@@ -82,6 +135,11 @@ function populateVerifyDropdown() {
         isComplete: isVerifyPageComplete(res),
     }));
     renderStatusDropdown('verify-page-dropdown', items, currentVerifyIndex, (index) => {
+        if (index === currentVerifyIndex) return;
+        if (!confirmSaveDirtyVerifyPage()) {
+            populateVerifyDropdown();
+            return;
+        }
         currentVerifyIndex = index;
         renderVerifyPage();
     });
@@ -89,6 +147,7 @@ function populateVerifyDropdown() {
 
 function prevVerifyPage() {
     if (currentVerifyIndex > 0) {
+        if (!confirmSaveDirtyVerifyPage()) return;
         currentVerifyIndex--;
         renderVerifyPage();
     }
@@ -96,6 +155,7 @@ function prevVerifyPage() {
 
 function nextVerifyPage() {
     if (currentVerifyIndex < verifyScanResults.length - 1) {
+        if (!confirmSaveDirtyVerifyPage()) return;
         currentVerifyIndex++;
         renderVerifyPage();
     }
@@ -124,18 +184,55 @@ function unidentifiedStatusText(page) {
     return "Unidentified (data matrix failed)";
 }
 
-function renderVerifyPage() {
+function applyVerifyFlipVisual() {
+    const wrap = document.getElementById('verify-page-wrap');
+    const btn = document.getElementById('verify-flip-btn');
+    if (wrap) wrap.classList.toggle('is-flipped', !!verifyFlip180);
+    if (btn) btn.textContent = verifyFlip180 ? 'Undo Flip' : 'Flip 180°';
+}
+
+function toggleVerifyFlip() {
+    verifyFlip180 = !verifyFlip180;
+    applyVerifyFlipVisual();
+}
+
+function deleteVerifyPage() {
     if (verifyScanResults.length === 0) return;
     const page = verifyScanResults[currentVerifyIndex];
-    
-    populateVerifyDropdown();
-    
+    if (!confirm('Delete this page from the scan? It will be omitted when you Finalize Scans.')) return;
+    verifyCorrections[String(page.ppage_indx)] = { delete: true };
+    verifyScanResults.splice(currentVerifyIndex, 1);
+    if (currentVerifyIndex >= verifyScanResults.length) {
+        currentVerifyIndex = Math.max(0, verifyScanResults.length - 1);
+    }
+    verifyDirtyBaseline = null;
+    renderVerifyPage();
+}
+
+function renderVerifyPage() {
     const loading = document.getElementById('verify-loading');
     const img = document.getElementById('verify-img');
     const overlay = document.getElementById('verify-anchors-overlay');
     const status = document.getElementById('verify-status');
     const assnIdInput = document.getElementById('verify-assn-id');
     const pageNumInput = document.getElementById('verify-page-num');
+
+    populateVerifyDropdown();
+
+    if (verifyScanResults.length === 0) {
+        if (loading) loading.classList.add('hidden');
+        if (img) img.classList.add('hidden');
+        if (overlay) overlay.innerHTML = '';
+        if (status) {
+            status.textContent = 'No pages left in this scan.';
+            status.style.color = '#dc2626';
+        }
+        verifyFlip180 = false;
+        applyVerifyFlipVisual();
+        verifyDirtyBaseline = null;
+        return;
+    }
+    const page = verifyScanResults[currentVerifyIndex];
 
     loading.classList.remove('hidden');
     img.classList.add('hidden');
@@ -147,8 +244,10 @@ function renderVerifyPage() {
     // Load correction if exists, otherwise defaults
     const c_key = String(page.ppage_indx);
     const existingCorrection = verifyCorrections[c_key];
+    verifyFlip180 = !!(existingCorrection && existingCorrection.rotate_180);
+    applyVerifyFlipVisual();
     
-    if (existingCorrection) {
+    if (existingCorrection && !existingCorrection.delete) {
         assnIdInput.value = existingCorrection.assn_id;
         pageNumInput.value = existingCorrection.page;
         verifyAnchors = Array.isArray(existingCorrection.tiff_anchors)
@@ -181,10 +280,12 @@ function renderVerifyPage() {
         loading.classList.add('hidden');
         img.classList.remove('hidden');
         drawVerifyAnchors();
+        captureVerifyDirtyBaseline();
     };
     img.removeAttribute('src');
     img.src = annotatedImageUrl(page.image_path);
     focusNavSentinel('verify-focus-sentinel');
+    if (!img.src) captureVerifyDirtyBaseline();
 }
 
 function computerAnchorsForPage(page) {
@@ -197,8 +298,10 @@ function handleVerifyClick(e) {
     const rect = img.getBoundingClientRect();
     const scaleX = img.naturalWidth / rect.width;
     const scaleY = img.naturalHeight / rect.height;
-    const x = (e.clientX - rect.left) * scaleX;
-    const y = (e.clientY - rect.top) * scaleY;
+    const xLayout = (e.clientX - rect.left) * scaleX;
+    const yLayout = (e.clientY - rect.top) * scaleY;
+    const x = verifyFlip180 ? (img.naturalWidth - xLayout) : xLayout;
+    const y = verifyFlip180 ? (img.naturalHeight - yLayout) : yLayout;
     const hitR2 = 18 * 18;
     const hitIndex = verifyAnchors.findIndex(([ax, ay]) => {
         const dx = (ax - x) / scaleX;
@@ -258,14 +361,15 @@ async function clearArchiveContext() {
     } catch (e) {
         console.error(e);
     }
+    archiveSessionOpen = false;
 }
 
 async function leaveVerifyScans() {
-    await clearArchiveContext();
     showSection('process-sec');
 }
 
 function saveVerifyCorrection() {
+    if (verifyScanResults.length === 0) return false;
     const page = verifyScanResults[currentVerifyIndex];
     const assnIdInput = document.getElementById('verify-assn-id').value;
     const pageNumInput = document.getElementById('verify-page-num').value;
@@ -275,7 +379,7 @@ function saveVerifyCorrection() {
             title: 'Missing Fields',
             message: 'Please provide both Assn ID and Page Number.',
         });
-        return;
+        return false;
     }
 
     if (verifyAnchors.length < VERIFY_MIN_ANCHORS) {
@@ -283,26 +387,32 @@ function saveVerifyCorrection() {
             title: 'More Anchors Needed',
             message: `Please mark at least ${VERIFY_MIN_ANCHORS} anchor positions on the image.`,
         });
-        return;
+        return false;
     }
     
     const correction = {
         assn_id: parseInt(assnIdInput),
         page: parseInt(pageNumInput),
         tiff_anchors: [...verifyAnchors],
+        rotate_180: !!verifyFlip180,
     };
     
     verifyCorrections[String(page.ppage_indx)] = correction;
     renderVerifyPage(); // To update status text
+    return true;
 }
 
 async function finalizeScans() {
-    if (Object.keys(verifyCorrections).length === 0) {
+    if (!confirmSaveDirtyVerifyPage()) return;
+
+    const pending = Object.keys(verifyCorrections).length;
+    if (pending === 0) {
         // No corrections, just go back to main menu or wherever
         showMessageModal({
             title: 'Verification Complete',
             message: 'No corrections made. Verification complete.',
         });
+        resetVerifySessionState();
         await clearArchiveContext();
         showSection('main-menu');
         return;
@@ -351,6 +461,7 @@ async function finalizeScans() {
         if (activeProcessSocket === ws) activeProcessSocket = null;
         // process_scans rewrote the .assn archive in its own temp dir; drop the verify extract.
         await clearArchiveContext();
+        resetVerifySessionState();
         showMessageModal({
             title: 'Success',
             message: 'Scans finalized successfully!',

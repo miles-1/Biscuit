@@ -269,45 +269,34 @@ function visibleWorkspaceId() {
     return null;
 }
 
+async function abandonArchiveSession() {
+    try {
+        await fetch('/api/abandon_archive_session', { method: 'POST' });
+    } catch (e) {
+        /* session is still detached on the client */
+    }
+    archiveSessionOpen = false;
+    gradingData = {};
+    if (typeof resetVerifySessionState === 'function') resetVerifySessionState();
+}
+
 async function goHome() {
     const current = visibleWorkspaceId();
     if (current === 'main-menu') return;
 
-    if (current === 'grading-ui') {
-        try {
-            const commitRes = await commitCurrentGradingData();
-            let commitData = {};
-            try { commitData = await commitRes.json(); } catch (e) { /* ignore */ }
-            if (!commitRes.ok || commitData.status !== 'success') {
-                showMessageModal({
-                    title: 'Error',
-                    message: commitData.message || 'Failed to save grading data before leaving.',
-                });
-                return;
-            }
-            const res = await fetch('/api/close_grading_session', { method: 'POST' });
-            let data = {};
-            try { data = await res.json(); } catch (e) { /* ignore */ }
-            if (!res.ok || data.status !== 'success') {
-                showMessageModal({
-                    title: 'Error',
-                    message: data.message || 'Failed to close grading session.',
-                });
-                return;
-            }
-        } catch (e) {
-            showMessageModal({
-                title: 'Error',
-                message: e.message || String(e),
-            });
-            return;
+    const tmpOpen = !!archiveSessionOpen || current === 'grading-ui' || current === 'verify-sec';
+    if (tmpOpen || current === 'builder-sec') {
+        const ok = await showConfirmModal({
+            title: 'Leave without saving?',
+            message: 'Go home without saving?',
+            confirmLabel: 'Go home',
+            cancelLabel: 'Cancel',
+        });
+        if (!ok) return;
+        if (tmpOpen) {
+            skipVerifyLeaveConfirm = current === 'verify-sec';
+            await abandonArchiveSession();
         }
-        showSection('main-menu');
-        return;
-    }
-
-    if (current === 'verify-sec') {
-        await clearArchiveContext();
         showSection('main-menu');
         return;
     }

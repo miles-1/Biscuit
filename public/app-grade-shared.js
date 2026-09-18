@@ -80,7 +80,20 @@ function findFirstUngradedQuestion() {
     return null;
 }
 
+function discardBlankFeedback() {
+    if (!gradingData || typeof gradingData !== 'object') return;
+    for (const [key, entry] of Object.entries(gradingData)) {
+        if (key === 'feedback-templates' || !entry || !Array.isArray(entry.questions)) continue;
+        for (const q of entry.questions) {
+            if (typeof q.feedback === 'string' && q.feedback.trim() === '') {
+                delete q.feedback;
+            }
+        }
+    }
+}
+
 function commitCurrentGradingData() {
+    discardBlankFeedback();
     refreshAssnPointTotals();
     return fetch('/api/save_grading_data', {method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(gradingData)})
 }

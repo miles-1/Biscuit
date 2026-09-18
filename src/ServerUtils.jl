@@ -78,9 +78,9 @@ function compile_feedback_bundle(;
     return nothing
 end
 
-function _name_guess_for_assn(name_guesses, assn_id)::Union{Nothing, String}
-    isa(name_guesses, AbstractDict) || return nothing
-    raw = get(name_guesses, string(assn_id), get(name_guesses, assn_id, nothing))
+function _name_from_processed_entry(processed_entry)::Union{Nothing, String}
+    isa(processed_entry, AbstractDict) || return nothing
+    raw = get(processed_entry, "name", nothing)
     isa(raw, AbstractString) || return nothing
     stripped = strip(String(raw))
     return isempty(stripped) ? nothing : stripped
@@ -294,7 +294,6 @@ function _build_grading_data_from_archive()::Dict{Int64, Dict{String, Any}}
     selection = _read_file_from_temp("selection.json")
     page_elements = _read_file_from_temp("page_elements.json"; give_default=true)
     var_answers = _read_file_from_temp("var_answers.json"; give_default=true)
-    name_guesses = _read_file_from_temp("name_guesses.json"; give_default=true)
     grading_data = Dict{Int64, Dict{String, Any}}()
 
     function flatten_master_questions(questions::AbstractVector, path::String="")::Vector{Dict{String, Any}}
@@ -494,7 +493,7 @@ function _build_grading_data_from_archive()::Dict{Int64, Dict{String, Any}}
         end
         # save questions for version
         entry = Dict{String, Any}("questions" => processed_questions)
-        guessed = _name_guess_for_assn(name_guesses, assn_id_int)
+        guessed = _name_from_processed_entry(processed_entry)
         if guessed !== nothing
             entry["name"] = guessed
             entry["name_guessed"] = true

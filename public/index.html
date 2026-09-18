@@ -240,9 +240,9 @@
                     <span class="btn-spinner"></span>
                     <span>Loading...</span>
                 </div>
-                <div class="page-wrap" id="verify-page-wrap" style="position: relative; display: inline-block;">
+                <div class="page-wrap" id="verify-page-wrap">
                     <img id="verify-img" style="max-width: 100%; display: block;" onclick="handleVerifyClick(event)">
-                    <div id="verify-anchors-overlay" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none;"></div>
+                    <div id="verify-anchors-overlay"></div>
                 </div>
             </div>
             <div class="right-pane" id="verify-right-pane">
@@ -255,7 +255,10 @@
                     <input type="number" id="verify-page-num" min="1"><br><br>
                     <p style="font-size: 0.9em; color: #555;"><i>For pages that need correction, enter Assn ID and Page Number, then click at least 4 anchor positions on the image (up to 14). Click an existing circle to remove it.</i></p>
                     <p>Anchors placed: <strong id="verify-anchor-count">0</strong></p>
-                    <button type="button" onclick="resetVerifyAnchors()">Reset Anchors</button><br><br>
+                    <button type="button" onclick="resetVerifyAnchors()">Reset Anchors</button>
+                    <button type="button" id="verify-flip-btn" onclick="toggleVerifyFlip()">Flip 180°</button>
+                    <button type="button" onclick="deleteVerifyPage()">Delete Page</button>
+                    <br><br>
                     <button type="button" onclick="saveVerifyCorrection()" style="font-weight: bold;">Save Correction</button>
                 </div>
             </div>

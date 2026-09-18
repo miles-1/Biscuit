@@ -1694,7 +1694,7 @@ async function confirmSaveMaster() {
         } else {
             builderState.filePath = data.path;
             closeSaveMasterModal();
-            closeMasterBuilder();
+            closeMasterBuilder({ skipConfirm: true });
 
             // Set the master path on Create Assignment page and validate immediately
             const masterInput = document.getElementById('gen-master-path');
@@ -1717,7 +1717,16 @@ async function confirmSaveMaster() {
     }
 }
 
-function closeMasterBuilder() {
+async function closeMasterBuilder({ skipConfirm = false } = {}) {
+    if (!skipConfirm) {
+        const ok = await showConfirmModal({
+            title: 'Leave without saving?',
+            message: 'Go back without saving?',
+            confirmLabel: 'Go back',
+            cancelLabel: 'Cancel',
+        });
+        if (!ok) return;
+    }
     showSection('generate-sec');
 }
 

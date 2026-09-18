@@ -506,6 +506,14 @@ end
     return Dict("status" => "success")
 end
 
+# Detach the extracted `.assn.tmp` without packing or deleting it. Home uses this
+# so "Go home without saving?" leaves the temp folder for a later resume prompt.
+@post "/api/abandon_archive_session" function(req::HTTP.Request)
+    STATE["temp_archive_dir"] = nothing
+    STATE["assn_archive_path"] = nothing
+    return Dict("status" => "success")
+end
+
 # --- Managed classes (roster CSVs) ---
 
 @get "/api/classes" function(req::HTTP.Request)
@@ -810,8 +818,6 @@ end
     !client_ok && push!(missing, "This app build is missing its Google Drive client file.")
     if !roster_present
         push!(missing, "No class roster CSV is in this assignment archive (select a class when creating the assignment).")
-    elseif !has_student_email
-        push!(missing, "Class roster CSV is missing an `Email` column.")
     end
     return Dict(
         "status" => "success",
@@ -821,7 +827,7 @@ end
         "has_student_email" => has_student_email,
         "roster_present" => roster_present,
         "class_name" => class_name,
-        "can_upload" => client_ok && roster_present && has_student_email,
+        "can_upload" => client_ok && roster_present,
         "missing" => missing,
         "token_path" => linked ? token_path : nothing,
     )
@@ -874,12 +880,6 @@ function _drive_upload_context(feedback_dir::AbstractString)
         return Dict(
             "status" => "error",
             "message" => "Class roster CSV must include a `Student` column",
-        )
-    end
-    if !students_table_has_email(students)
-        return Dict(
-            "status" => "error",
-            "message" => "Class roster CSV must include an `Email` column for Google Drive upload",
         )
     end
     assn_name = first(splitext(basename(archive_path)))
