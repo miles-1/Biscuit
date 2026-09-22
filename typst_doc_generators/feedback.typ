@@ -3,10 +3,12 @@
   while string.len() < length {string = char + string}
   string
 }
-#let format_answer(manual_answer, backup:none) = if type(manual_answer) != array {
-  if type(manual_answer) == int {manual_answer+1} else {manual_answer}
+#let format_answer(manual_answer, backup: none) = if type(manual_answer) != array {
+  if type(manual_answer) == int { manual_answer + 1 } else { manual_answer }
+} else if type(backup) != array {
+  manual_answer
 } else {
-  for (ma, a) in manual_answer.zip(backup) {(if ma == none {a} else {ma},)}
+  for (ma, a) in manual_answer.zip(backup) { (if ma == none { a } else { ma },) }
 }
 #let make_horizon_line(img, body) = grid(columns:2, column-gutter:5pt, align:horizon, body, img)
 #let get_score(points,max_points) = raw(str(points) + "/" + str(max_points))

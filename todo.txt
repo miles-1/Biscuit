@@ -1,18 +1,20 @@
+- [ ] Data validation UI for namereader
 - [ ] moving to Use Sections (or back?) can preserve questions written thus far
-- [ ] user does not call close on web socket
-- [ ] When changing between questions, assn stays the same where possible (skip question when a certain assignment doesn't have it)
+- [ ] user does not call close on web socket?
+- [ ] grading: When changing between questions, assn ID stays the same where possible (skip question when a certain assignment doesn't have it)
 - [ ] make sure to delete temp folders from julia and from archives
 - [ ] slide window resize between left and right
 - [ ] ability to copy notes from other file
 - [ ] make better randomizer to fill pages - get q heights by query
-- [ ] Make preview show normal preview or something
-- [ ] export two things: key and folder-of-versions/single-export. Option to not export key.
 - [ ] caffeinate on train
-- [ ] original images 14.1 MB, annotated are 110.7 MB
-
-SKIPPED
-- [ ] Section name not exactly copied
-- [ ] get rid of "choose one option"?
+- [ ] original images 14.1 MB, annotated are 110.7 MB. Also, tiff size all over. How to control better?
+- [ ] pinpoint slowdowns, large files
+	- [ ] verify scans and finalize take forever
+	- [ ] first load of directory/file select modal takes too long
+- [ ] initial "Verify Scans?" modal says how many need to be checked
+- [ ] Verify Scans shows count of how many need to be completed
+- [ ] Don't let arrow keys change score in grading
+- [ ] be able to manage google drive folders/files using auxilliary function?
 
 COMPLETED, UNTESTED
 - [x] if feedback is just whitespace, don't render
@@ -51,3 +53,8 @@ COMPLETED, UNTESTED
 - [x] save feedback window resize by question?
 - [x] change header in csv from Assignment Scores to actual name
 - [x] make sure all pages included in feedback
+
+SKIPPED
+- [ ] Section name not exactly copied
+- [ ] get rid of "choose one option"?
+- [ ] export two things: key and folder-of-versions/single-export. Option to not export key.
