@@ -64,24 +64,52 @@ end
 
 # Biscuit binds a fixed port and keeps per-user state under ~/.config/biscuit, so an instance left
 # behind by a closed terminal blocks the next launch. Each run records its pid for the port it
-# claimed; the next run retires that pid first. Before signalling anything we re-read the live
-# process's command line and require it to match what was recorded, so a pid that has since been
-# recycled by an unrelated program is reported and skipped rather than killed.
+# claimed; the next run retires that pid first. Before signalling anything we re-read a stable
+# identity of the live process and require it to match what was recorded, so a pid that has since
+# been recycled by an unrelated program is reported and skipped rather than killed.
+#
+# On Windows that identity is the executable path, read with QueryFullProcessImageName. Do not
+# shell out to PowerShell here: this runs before the HTTP server listens, and
+# `Get-CimInstance Win32_Process` both starts slowly and deadlocks when its stderr pipe fills
+# under the launcher's redirected stdio. A hung lookup means port 8080 never opens.
 
 _pid_file_path(port::Integer)::String = joinpath(config_dir(), "biscuit-$port.pid")
 
 """
-Command line of `pid` as the OS reports it, or `nothing` when no such process is running.
+Full image path of a Windows process, or `nothing` when it is not running or not queryable.
+"""
+function _windows_image_path(pid::Integer)::Union{Nothing,String}
+    # PROCESS_QUERY_LIMITED_INFORMATION
+    handle = ccall((:OpenProcess, "kernel32"), Ptr{Cvoid},
+        (UInt32, Int32, UInt32), UInt32(0x1000), Int32(0), UInt32(pid))
+    handle == C_NULL && return nothing
+    try
+        cap = 32767
+        buf = Vector{UInt16}(undef, cap + 1)
+        len = Ref{UInt32}(UInt32(cap))
+        ok = ccall((:QueryFullProcessImageNameW, "kernel32"), Int32,
+            (Ptr{Cvoid}, UInt32, Ptr{UInt16}, Ref{UInt32}),
+            handle, UInt32(0), buf, len)
+        ok == 0 && return nothing
+        n = Int(len[])
+        (n <= 0 || n > cap) && return nothing
+        path = strip(transcode(String, @view buf[1:n]))
+        return isempty(path) ? nothing : path
+    finally
+        ccall((:CloseHandle, "kernel32"), Int32, (Ptr{Cvoid},), handle)
+    end
+end
+
+"""
+Identity of `pid` as recorded for later comparison, or `nothing` when no such process is running.
+Windows: full executable path. Elsewhere: the process command line.
 """
 function _live_command_line(pid::Integer)::Union{Nothing,String}
-    cmd = if Sys.iswindows()
-        Cmd(["powershell", "-NoProfile", "-Command",
-             "(Get-CimInstance Win32_Process -Filter 'ProcessId=$pid').CommandLine"])
-    else
-        Cmd(["ps", "-p", string(pid), "-o", "command="])
+    if Sys.iswindows()
+        return _windows_image_path(pid)
     end
     out = try
-        read(cmd, String)
+        read(pipeline(`ps -p $(pid) -o command=`; stderr=devnull), String)
     catch
         return nothing # non-zero exit means no such pid
     end

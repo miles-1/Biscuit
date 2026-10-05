@@ -242,10 +242,19 @@ namespace BiscuitLauncher
         static void PollServerAndOpenBrowser()
         {
             string url = "http://127.0.0.1:8080/";
-            for (int i = 0; i < 300; i++)
+            // Keep polling until the backend exits. A fixed ~60s budget used to give up
+            // while a slow first launch was still starting, so the browser never opened
+            // even if the server came up afterwards.
+            int attempt = 0;
+            bool announced = false;
+            while (serverProcess != null && !serverProcess.HasExited)
             {
-                if (serverProcess == null || serverProcess.HasExited)
-                    return;
+                attempt++;
+                if (!announced && attempt == 25)
+                {
+                    announced = true;
+                    TeeLine("Waiting for the server to finish starting...");
+                }
                 try
                 {
                     HttpWebRequest req = (HttpWebRequest)WebRequest.Create(url);

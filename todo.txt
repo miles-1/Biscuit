@@ -15,6 +15,7 @@
 - [ ] Verify Scans shows count of how many need to be completed
 - [ ] Don't let arrow keys change score in grading
 - [ ] be able to manage google drive folders/files using auxilliary function?
+- [ ] "I couldn’t get the new version of Biscuit to open in browser even after waiting ~10min after launching the application, so I used the old version."
 
 COMPLETED, UNTESTED
 - [x] if feedback is just whitespace, don't render
