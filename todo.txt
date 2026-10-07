@@ -16,6 +16,18 @@
 - [ ] Don't let arrow keys change score in grading
 - [ ] be able to manage google drive folders/files using auxilliary function?
 - [ ] "I couldn’t get the new version of Biscuit to open in browser even after waiting ~10min after launching the application, so I used the old version."
+- [ ] allow discard changes for moving away from verify scans
+- [ ] add (full points) option as alternative to (-N)?
+- [ ] why does it take so long to load files/folders first time?
+- [ ] keyboard shortcuts like alt + up/down, ctrl + D, etc
+- [ ] toggle preview option between seeing example and key
+- [ ] preview test & section intros
+- [ ] better interface for vars and secondary_vars
+- [ ] maybe better to just export small svgs or html for keys so its formatted
+- [ ] generate random arrays of numbers option
+- [ ] instead of vars and secondary vars per question, generate global vars and allow arbitrary code
+- [ ] collapsable sections in assignment builder
+- [ ] change section # to match zero-indexing
 
 COMPLETED, UNTESTED
 - [x] if feedback is just whitespace, don't render

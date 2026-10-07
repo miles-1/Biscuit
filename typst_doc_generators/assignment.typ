@@ -145,7 +145,7 @@
 #let multiple_choice(body, ..args) = {
   let (options, info) = get_grid_args(..args, is_single_correct_answer:true)
   grid_question(
-    body + [ Choose *one* option.],
+    body, // + [ Choose *one* option.],
     columns: 2,
     ..for o in options {(BUBBLE, o)},
     ..info,
@@ -154,7 +154,7 @@
 #let true_false(body, ..args) = {
   let (options, info) = get_grid_args(..args, is_single_correct_answer:false)
   grid_question(
-    body + [ For *each* option, choose true or false.],
+    body, // + [ For *each* option, choose true or false.],
     columns: 3,
     header_cells: (strong[T], strong[F], none),
     row-gutter: (3pt, 10pt),
@@ -200,7 +200,8 @@
 #let get_single_selected_question(m_q, s_q, id:"", global_vars:none, is_key:false) = {
   let (option_permutation, vars, type) = get_all(s_q, "option_permutation", "vars", "type")
   let (secondary_vars, type, options, correct_answer) = get_all(m_q, "secondary_vars", "type", "options", "correct_answer")
-  let is_eval_mkup = not is_key or vars == none
+  let defines_vars = std.type(m_q.at("vars", default: none)) == dictionary
+  let is_eval_mkup = not is_key or not defines_vars
   if std.type(vars) == dictionary {
     m_q.vars = vars
     if std.type(secondary_vars) == dictionary {
@@ -234,10 +235,21 @@
   let s_qs = s_dict.at("questions", default:none)
   let has_sections = is_top_level and "section_title" in m_qs.first()
   if has_sections {
-    return for (indx, (m_q, s_q)) in m_qs.zip(s_qs).enumerate() {(
-      eval_mkup(global_vars:global_vars, m_q.section_title),
-      ..get_selected_questions(m_q, s_q, id:str(indx), global_vars:global_vars, is_key:is_key)
-    )}
+    // Selection order may differ from the master. `indx` is the master section,
+    // and it is also the question-id prefix so grading still lines up.
+    return for s_q in s_qs {
+      if type(s_q) == int {s_q = (indx: s_q)}
+      let indx = s_q.indx
+      let m_q = m_qs.at(indx)
+      let intro = m_q.at("intro_content", default:none)
+      (
+        (
+          section_title: eval_mkup(global_vars:global_vars, m_q.section_title),
+          intro_content: if intro != none and intro != "" {eval_mkup(global_vars:global_vars, intro)} else {none},
+        ),
+        ..get_selected_questions(m_q, s_q, id:str(indx), global_vars:global_vars, is_key:is_key, is_top_level:false)
+      )
+    }
   }
   if id != "" {id = id + "-"}
   return for s_q in s_qs {
@@ -312,6 +324,12 @@
         ])
         let qs = get_selected_questions(master, v, global_vars:global_vars, is_key:is_key)
         for q in qs {
+          if type(q) == dictionary and "section_title" in q {
+            heading(q.section_title)
+            if q.intro_content != none {q.intro_content}
+            std.v(5mm, weak:true)
+            continue
+          }
           if type(q) != dictionary {heading(q);std.v(5mm,weak:true);continue}
           total_q_counter.step()
           assert("type" in q and "body" in q, message:"all questions must have the `type` and `body` keys specified")

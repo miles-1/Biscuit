@@ -10,6 +10,7 @@ let builderState = {
         section_numbering: '[1]',
         shuffle_questions: false,
         shuffle_answers: false,
+        shuffle_sections: false,
         version_count: 1,
         seed: 1234,
         global_vars: '',
@@ -108,6 +109,7 @@ function createDefaultBank() {
 function createDefaultSection(title = 'New Section') {
     return {
         section_title: title,
+        intro_content: '',
         questions: []
     };
 }
@@ -142,6 +144,7 @@ function resetBuilderState(path = '') {
             section_numbering: '[1]',
             shuffle_questions: false,
             shuffle_answers: false,
+            shuffle_sections: false,
             version_count: 1,
             seed: 1234,
             global_vars: '',
@@ -204,6 +207,7 @@ function loadMasterDataIntoState(data, path = '') {
         section_numbering: data.section_numbering !== undefined && data.section_numbering !== null ? String(data.section_numbering) : '[1]',
         shuffle_questions: !!data.shuffle_questions,
         shuffle_answers: !!data.shuffle_answers,
+        shuffle_sections: !!data.shuffle_sections,
         version_count: typeof data.version_count === 'number' ? data.version_count : 1,
         seed: typeof data.seed === 'number' ? data.seed : 1234,
         global_vars: data.global_vars || '',
@@ -212,6 +216,7 @@ function loadMasterDataIntoState(data, path = '') {
         use_sections: hasSections,
         sections: hasSections ? questionsRaw.map((sec) => applyShuffleOverrides({
             section_title: String(sec.section_title || ''),
+            intro_content: sec.intro_content || '',
             questions: normalizeQuestionsFromData(sec.questions || []),
         }, sec)) : [createDefaultSection('Section 1')],
         questions: !hasSections ? normalizeQuestionsFromData(questionsRaw) : [],
@@ -235,6 +240,7 @@ function buildMasterJsonPayload() {
     }
     if (m.shuffle_questions) result.shuffle_questions = true;
     if (m.shuffle_answers) result.shuffle_answers = true;
+    if (m.use_sections && m.shuffle_sections) result.shuffle_sections = true;
     if (typeof m.version_count === 'number' && m.version_count > 0) {
         result.version_count = m.version_count;
     }
@@ -250,10 +256,15 @@ function buildMasterJsonPayload() {
     result.will_print_double_sided = m.will_print_double_sided !== undefined ? !!m.will_print_double_sided : true;
 
     if (m.use_sections) {
-        result.questions = (m.sections || []).map((sec) => applyShuffleOverrides({
-            section_title: (sec.section_title || '').trim(),
-            questions: sanitizeQuestionList(sec.questions || [])
-        }, sec));
+        result.questions = (m.sections || []).map((sec) => {
+            const section = {
+                section_title: (sec.section_title || '').trim(),
+                questions: sanitizeQuestionList(sec.questions || []),
+            };
+            const intro = (sec.intro_content || '').trim();
+            if (intro) section.intro_content = intro;
+            return applyShuffleOverrides(section, sec);
+        });
     } else {
         result.questions = sanitizeQuestionList(m.questions || []);
     }
@@ -516,6 +527,10 @@ function renderTopLevelSettingsHtml() {
                     <span>Shuffle Answers</span>
                 </label>
                 <label class="builder-checkbox-label">
+                    <input type="checkbox" id="builder-shuffle-s" ${m.shuffle_sections ? 'checked' : ''} ${m.use_sections ? '' : 'disabled'}>
+                    <span>Shuffle Sections</span>
+                </label>
+                <label class="builder-checkbox-label">
                     <input type="checkbox" id="builder-single-doc" ${m.single_doc_export ? 'checked' : ''}>
                     <span>Single Doc Export</span>
                 </label>
@@ -626,13 +641,16 @@ function renderSectionCardHtml(sec, sIdx) {
     return `
         <div class="builder-section-card" data-section-index="${sIdx}">
             <div class="builder-section-header">
-                <span class="builder-section-badge">Section ${sIdx + 1}</span>
-                <input type="text" class="builder-input builder-section-title-input" value="${escapeHtml(sec.section_title)}" placeholder="Section Title (e.g. Part I: Multiple Choice)" oninput="updateSectionTitle(${sIdx}, this.value)">
-                <div class="builder-item-actions">
-                    <button type="button" class="btn-icon" title="Move Up" ${sIdx === 0 ? 'disabled' : ''} onclick="moveSection(${sIdx}, -1)"><span>▲</span></button>
-                    <button type="button" class="btn-icon" title="Move Down" ${sIdx === (builderState.master.sections.length - 1) ? 'disabled' : ''} onclick="moveSection(${sIdx}, 1)"><span>▼</span></button>
-                    <button type="button" class="btn-icon btn-danger" title="Delete Section" onclick="deleteSection(${sIdx})"><span>🗑</span></button>
+                <div class="builder-section-header-row">
+                    <span class="builder-section-badge">Section ${sIdx + 1}</span>
+                    <input type="text" class="builder-input builder-section-title-input" value="${escapeHtml(sec.section_title)}" placeholder="Section Title (e.g. Part I: Multiple Choice)" oninput="updateSectionTitle(${sIdx}, this.value)">
+                    <div class="builder-item-actions">
+                        <button type="button" class="btn-icon" title="Move Up" ${sIdx === 0 ? 'disabled' : ''} onclick="moveSection(${sIdx}, -1)"><span>▲</span></button>
+                        <button type="button" class="btn-icon" title="Move Down" ${sIdx === (builderState.master.sections.length - 1) ? 'disabled' : ''} onclick="moveSection(${sIdx}, 1)"><span>▼</span></button>
+                        <button type="button" class="btn-icon btn-danger" title="Delete Section" onclick="deleteSection(${sIdx})"><span>🗑</span></button>
+                    </div>
                 </div>
+                <textarea class="builder-textarea" rows="2" placeholder="Intro content under this section title (optional Typst markup)" oninput="updateSectionIntro(${sIdx}, this.value)">${escapeHtml(sec.intro_content || '')}</textarea>
             </div>
             <div class="builder-shuffle-row">
                 ${renderShuffleOverrideSelect(sec, 'shuffle_questions', `updateSectionShuffle(${sIdx}, 'shuffle_questions', this.value)`, 'Shuffle questions')}
@@ -1018,6 +1036,9 @@ function attachBuilderEventListeners() {
     const shufA = document.getElementById('builder-shuffle-a');
     if (shufA) shufA.onchange = () => { builderState.master.shuffle_answers = shufA.checked; };
 
+    const shufS = document.getElementById('builder-shuffle-s');
+    if (shufS) shufS.onchange = () => { builderState.master.shuffle_sections = shufS.checked; };
+
     const singleDoc = document.getElementById('builder-single-doc');
     if (singleDoc) singleDoc.onchange = () => { builderState.master.single_doc_export = singleDoc.checked; };
 
@@ -1263,6 +1284,7 @@ function toggleUseSections(useSec) {
         builderState.master.sections = [
             {
                 section_title: 'Section 1',
+                intro_content: '',
                 questions: builderState.master.questions && builderState.master.questions.length > 0
                     ? JSON.parse(JSON.stringify(builderState.master.questions))
                     : [createDefaultQuestion('multiple_choice')]
@@ -1299,6 +1321,12 @@ function addSection() {
 function updateSectionTitle(sIdx, title) {
     if (builderState.master.sections && builderState.master.sections[sIdx]) {
         builderState.master.sections[sIdx].section_title = title;
+    }
+}
+
+function updateSectionIntro(sIdx, intro) {
+    if (builderState.master.sections && builderState.master.sections[sIdx]) {
+        builderState.master.sections[sIdx].intro_content = intro;
     }
 }
 

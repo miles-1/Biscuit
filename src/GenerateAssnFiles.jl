@@ -372,6 +372,7 @@ function validate_master_json(master::Dict{String, Any})::Nothing
         "section_numbering",
         "shuffle_questions",
         "shuffle_answers",
+        "shuffle_sections",
         "version_count",
         "seed",
         "global_vars",
@@ -402,6 +403,9 @@ function validate_master_json(master::Dict{String, Any})::Nothing
         _validation_error("root.section_numbering", "should be a string with valid typst numbering.")
     end
     _validate_optional_shuffle_flags(master, "root")
+    if haskey(master, "shuffle_sections") && !isa(master["shuffle_sections"], Bool)
+        _validation_error("root.shuffle_sections", "must be a boolean.")
+    end
     if haskey(master, "version_count") && !_is_nonnegative_integer(master["version_count"])
         _validation_error("root.version_count", "must be a nonnegative integer.")
     end
@@ -441,12 +445,15 @@ function validate_master_json(master::Dict{String, Any})::Nothing
             _require_allowed_and_required_keys(
                 section_obj,
                 sec_path,
-                Set(["section_title", "questions", "shuffle_questions", "shuffle_answers"]),
+                Set(["section_title", "intro_content", "questions", "shuffle_questions", "shuffle_answers"]),
                 Set(["section_title", "questions"]),
             )
             _validate_optional_shuffle_flags(section_obj, sec_path)
             if !isa(section_obj["section_title"], AbstractString)
                 _validation_error("$sec_path.section_title", "must be a string.")
+            end
+            if haskey(section_obj, "intro_content") && !isa(section_obj["intro_content"], AbstractString)
+                _validation_error("$sec_path.intro_content", "should be a string with valid typst markup.")
             end
             sec_questions = section_obj["questions"]
             if !isa(sec_questions, AbstractVector)
@@ -570,10 +577,18 @@ function _top_level_is_grouped(questions)::Bool
     return !isempty(questions) && all(q -> isa(q, AbstractDict) && haskey(q, "questions"), questions)
 end
 
+function _top_level_is_sections(questions)::Bool
+    return !isempty(questions) && all(q -> isa(q, AbstractDict) && haskey(q, "section_title"), questions)
+end
+
 function process_top_level_questions(questions, is_key::Bool, rng::AbstractRNG, config::NamedTuple)
     n = length(questions)
     indices = collect(0:(n - 1))
-    if !is_key && config.shuffle_q && !_top_level_is_grouped(questions)
+    # `indx` on each selection node stays the master index, so the grader can
+    # put a shuffled section back on its original question ids.
+    if !is_key && get(config, :shuffle_sections, false) && _top_level_is_sections(questions)
+        shuffle!(rng, indices)
+    elseif !is_key && config.shuffle_q && !_top_level_is_grouped(questions)
         shuffle!(rng, indices)
     end
     return [process_node(questions[i + 1], i, is_key, rng, config) for i in indices]
@@ -597,11 +612,12 @@ function generate_selection_json(; master_file::String, output_dir::String, prev
     rng = Xoshiro(seed)
     shuffle_q = Bool(get(master, "shuffle_questions", false))
     shuffle_a = Bool(get(master, "shuffle_answers", false))
+    shuffle_sections = Bool(get(master, "shuffle_sections", false))
     version_count = get(master, "version_count", 1)
     if preview && version_count > 0
         version_count = 1
     end
-    config = (; shuffle_q, shuffle_a)
+    config = (; shuffle_q, shuffle_a, shuffle_sections)
     questions = master["questions"]
     versions = []
     key_version = Dict(

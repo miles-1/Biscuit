@@ -1384,13 +1384,9 @@ end
     end
 end
 
+# Mounting at "/" also registers public/index.html at the empty path. HTTP treats
+# that as GET /, so a second @get "/" only replaces it and warns.
 staticfiles(joinpath(package_root(), "public"), "/")
-
-# Oxygen maps public/index.html to an empty route when mounted at "/", which does not
-# match GET /. Register the homepage explicitly.
-@get "/" function()
-    file(joinpath(package_root(), "public", "index.html"))
-end
 
     _ROUTES_REGISTERED[] = true
     return

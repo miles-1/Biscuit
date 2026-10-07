@@ -976,7 +976,7 @@ input[type="number"].score-input {
     max-width: 100%;
 }
 .builder-option-row > .typst-highlight-wrap.is-input,
-.builder-section-header > .typst-highlight-wrap.is-input {
+.builder-section-header-row > .typst-highlight-wrap.is-input {
     flex: 1;
     width: auto;
     max-width: none;
@@ -1604,11 +1604,17 @@ hr { border: none; border-top: 1px solid var(--border); }
 }
 .builder-section-header {
     display: flex;
-    align-items: center;
-    gap: 10px;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
     padding-bottom: 8px;
     margin-bottom: 10px;
     border-bottom: 1px solid var(--border-light);
+}
+.builder-section-header-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
 }
 .builder-section-badge {
     font-size: 0.82rem;
