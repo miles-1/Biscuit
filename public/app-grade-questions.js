@@ -75,17 +75,47 @@ function updateGradeDropdowns() {
     }));
     renderStatusDropdown('grade-assn-dropdown', assnItems, currentAssnIndexForQ, jumpToGradeAssn);
     // buttons
-    document.getElementById('btn-prev-q').disabled = (currentQIndex <= 0);
-    document.getElementById('btn-next-q').disabled = (currentQIndex >= questionIds.length - 1);
+    const assnId = currentGradeAssnId();
+    document.getElementById('btn-prev-q').disabled = (findQuestionWithAssn(currentQIndex, -1, assnId) < 0);
+    document.getElementById('btn-next-q').disabled = (findQuestionWithAssn(currentQIndex, 1, assnId) < 0);
     document.getElementById('btn-prev-assn-grade').disabled = (currentAssnIndexForQ <= 0);
     document.getElementById('btn-next-assn-grade').disabled = (currentAssnIndexForQ >= Object.keys(currentAssns).length - 1);
+    const ungraded = ungradedAssnIndicesForQ().length;
+    const nextUngradedBtn = document.getElementById('btn-next-ungraded-grade');
+    nextUngradedBtn.textContent = `Next Ungraded for Question (${ungraded || 'None'} Remaining)`;
+    nextUngradedBtn.disabled = ungraded === 0;
+    fitWorkspaceToolbars();
+}
+
+// Index of the nearest question in direction `step` that this assignment has, or -1.
+function findQuestionWithAssn(fromQIndex, step, assnId) {
+    for (let i = fromQIndex + step; i >= 0 && i < questionIds.length; i += step) {
+        if (assnId in questionsMap[questionIds[i]].assns) return i;
+    }
+    return -1;
+}
+
+function ungradedAssnIndicesForQ() {
+    const assns = questionsMap[questionIds[currentQIndex]]?.assns || {};
+    const ungraded = [];
+    Object.values(assns).forEach((q, i) => {
+        if (q?.is_graded !== true) ungraded.push(i);
+    });
+    return ungraded;
+}
+
+// Open question `qIndex` on the same assignment when it has that question, else its first one.
+async function showQuestionKeepingAssn(qIndex) {
+    const assnId = currentGradeAssnId();
+    await commitCurrentGradingData();
+    currentQIndex = qIndex;
+    const assnKeys = Object.keys(questionsMap[questionIds[qIndex]].assns);
+    currentAssnIndexForQ = Math.max(0, assnKeys.indexOf(assnId));
+    renderGradeStep();
 }
 
 async function jumpToQ(idx) {
-    await commitCurrentGradingData();
-    currentQIndex = parseInt(idx);
-    currentAssnIndexForQ = 0;
-    renderGradeStep();
+    await showQuestionKeepingAssn(parseInt(idx));
 }
 async function jumpToGradeAssn(idx) {
     await commitCurrentGradingData();
@@ -93,20 +123,21 @@ async function jumpToGradeAssn(idx) {
     renderGradeStep();
 }
 async function prevQ() {
-    if (currentQIndex > 0) {
-        await commitCurrentGradingData();
-        currentQIndex--;
-        currentAssnIndexForQ = 0;
-        renderGradeStep();
-    }
+    const target = findQuestionWithAssn(currentQIndex, -1, currentGradeAssnId());
+    if (target >= 0) await showQuestionKeepingAssn(target);
 }
 async function nextQ() {
-    if (currentQIndex < questionIds.length - 1) {
-        await commitCurrentGradingData();
-        currentQIndex++;
-        currentAssnIndexForQ = 0;
-        renderGradeStep();
-    }
+    const target = findQuestionWithAssn(currentQIndex, 1, currentGradeAssnId());
+    if (target >= 0) await showQuestionKeepingAssn(target);
+}
+async function nextUngradedGradeAssn() {
+    const ungraded = ungradedAssnIndicesForQ();
+    if (ungraded.length === 0) return;
+    const next = ungraded.find(i => i > currentAssnIndexForQ) ?? ungraded[0];
+    if (next === currentAssnIndexForQ) return;
+    await commitCurrentGradingData();
+    currentAssnIndexForQ = next;
+    renderGradeStep();
 }
 async function prevGradeAssn() {
     if (currentAssnIndexForQ > 0) {
@@ -651,19 +682,24 @@ function appendFeedbackTemplate(existing, template) {
     return current + gap + template;
 }
 
-// Resolves to the typed template text, or null if the grader backed out.
-function openFeedbackTemplateModal() {
+// Resolves to the typed template text, or null if the grader backed out. Passing `initialText`
+// opens the modal to edit an existing template.
+function openFeedbackTemplateModal(initialText = null) {
     return new Promise((resolve) => {
         const modal = document.getElementById('feedback-template-modal');
         const textarea = document.getElementById('feedback-template-text');
         const saveBtn = document.getElementById('feedback-template-save');
         const cancelBtn = document.getElementById('feedback-template-cancel');
         const closeBtn = document.getElementById('feedback-template-close');
+        const title = document.getElementById('feedback-template-title');
         if (!modal || !textarea || !saveBtn || !cancelBtn || !closeBtn) {
             resolve(null);
             return;
         }
-        textarea.value = '';
+        const isEdit = initialText !== null;
+        if (title) title.textContent = isEdit ? 'Edit Feedback Template' : 'New Feedback Template';
+        saveBtn.textContent = isEdit ? 'Save Changes' : 'Save Template';
+        textarea.value = isEdit ? initialText : '';
         modal.classList.remove('hidden');
         textarea.focus();
         const finish = (value) => {
@@ -1110,10 +1146,19 @@ function ensureFeedbackTemplates() {
     return gradingData["feedback-templates"];
 }
 
+function clearTemplateDropMarkers(listEl) {
+    listEl.querySelectorAll('.drop-before, .drop-after').forEach((el) => {
+        el.classList.remove('drop-before', 'drop-after');
+    });
+}
+
 function renderFeedbackTemplateList(listEl, qId, feedbackInput, currentItem) {
     listEl.innerHTML = '';
     const templates = ensureFeedbackTemplates()[qId];
     if (!Array.isArray(templates) || templates.length === 0) return;
+    const rerender = () => renderFeedbackTemplateList(listEl, qId, feedbackInput, currentItem);
+    const canReorder = templates.length > 1;
+    let dragFrom = null;
     templates.forEach((text, index) => {
         const item = document.createElement('div');
         item.classList.add('feedback-template-item');
@@ -1121,6 +1166,24 @@ function renderFeedbackTemplateList(listEl, qId, feedbackInput, currentItem) {
         const body = document.createElement('div');
         body.classList.add('feedback-template-text');
         body.textContent = text;
+
+        // Templates are copied into the feedback when applied, so editing one leaves past uses alone.
+        const editBtn = document.createElement('button');
+        editBtn.type = 'button';
+        editBtn.classList.add('feedback-template-edit');
+        editBtn.setAttribute('aria-label', 'Edit template');
+        editBtn.textContent = '✎';
+        editBtn.onclick = async (e) => {
+            e.stopPropagation();
+            const typed = await openFeedbackTemplateModal(text);
+            if (typed === null) return;
+            const edited = typed.trim();
+            const list = ensureFeedbackTemplates()[qId];
+            if (edited === "" || !Array.isArray(list) || list[index] !== text) return;
+            if (list.some((t, i) => i !== index && t === edited)) list.splice(index, 1);
+            else list[index] = edited;
+            rerender();
+        };
 
         const removeBtn = document.createElement('button');
         removeBtn.type = 'button';
@@ -1133,8 +1196,44 @@ function renderFeedbackTemplateList(listEl, qId, feedbackInput, currentItem) {
             if (!Array.isArray(list)) return;
             list.splice(index, 1);
             if (list.length === 0) delete ensureFeedbackTemplates()[qId];
-            renderFeedbackTemplateList(listEl, qId, feedbackInput, currentItem);
+            rerender();
         };
+
+        if (canReorder) {
+            item.draggable = true;
+            item.addEventListener('dragstart', (e) => {
+                dragFrom = index;
+                item.classList.add('dragging');
+                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.setData('text/plain', String(index));
+            });
+            item.addEventListener('dragend', () => {
+                dragFrom = null;
+                item.classList.remove('dragging');
+                clearTemplateDropMarkers(listEl);
+            });
+            item.addEventListener('dragover', (e) => {
+                if (dragFrom === null) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                const rect = item.getBoundingClientRect();
+                const after = e.clientY > rect.top + rect.height / 2;
+                clearTemplateDropMarkers(listEl);
+                item.classList.add(after ? 'drop-after' : 'drop-before');
+            });
+            item.addEventListener('drop', (e) => {
+                if (dragFrom === null) return;
+                e.preventDefault();
+                const rect = item.getBoundingClientRect();
+                let to = e.clientY > rect.top + rect.height / 2 ? index + 1 : index;
+                const list = ensureFeedbackTemplates()[qId];
+                const [moved] = list.splice(dragFrom, 1);
+                if (dragFrom < to) to--;
+                list.splice(to, 0, moved);
+                dragFrom = null;
+                rerender();
+            });
+        }
 
         item.onclick = () => {
             const applied = appendFeedbackTemplate(
@@ -1146,6 +1245,7 @@ function renderFeedbackTemplateList(listEl, qId, feedbackInput, currentItem) {
             // Drives the height, deduction, and syntax-highlight listeners in one go.
             feedbackInput.dispatchEvent(new Event('input', { bubbles: true }));
         };
+        item.appendChild(editBtn);
         item.appendChild(body);
         item.appendChild(removeBtn);
         listEl.appendChild(item);

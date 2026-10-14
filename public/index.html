@@ -217,21 +217,24 @@
 
     <!-- 2.5 Verify Scans -->
     <div id="verify-sec" class="section workspace-ui hidden" style="margin-top:0; border:none; padding:0;">
-        <div class="grade-toolbar">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                <h2 style="margin:0;">Verify Scans</h2>
-                <div style="display:flex; flex-direction:column; gap:6px;">
-                    <button style="font-weight: bold;" onclick="finalizeScans()">
-                        <span class="btn-spinner hidden" id="finalize-scans-spinner"></span>
-                        <span id="finalize-scans-label">Finalize Scans</span>
-                    </button>
-                    <button onclick="leaveVerifyScans()">Back</button>
-                </div>
+        <div class="grade-toolbar workspace-toolbar">
+            <h2 class="toolbar-title">Verify Scans</h2>
+            <div class="toolbar-actions">
+                <button style="font-weight: bold;" onclick="finalizeScans()">
+                    <span class="btn-spinner hidden" id="finalize-scans-spinner"></span>
+                    <span id="finalize-scans-label">Finalize Scans</span>
+                </button>
+                <button onclick="leaveVerifyScans()">Back</button>
             </div>
-            <div style="display: flex; justify-content: center; align-items: center; gap: 10px;">
-                <button onclick="prevVerifyPage()">&larr; Prev Page</button>
-                <div id="verify-page-dropdown" class="status-dropdown"></div>
-                <button onclick="nextVerifyPage()">Next Page &rarr;</button>
+            <div class="toolbar-nav">
+                <div class="toolbar-nav-row">
+                    <button class="toolbar-prev" onclick="prevVerifyPage()">&larr; Prev Page</button>
+                    <div class="toolbar-dropdown-col">
+                        <div id="verify-page-dropdown" class="status-dropdown"></div>
+                        <button id="verify-next-failed-btn" onclick="nextFailedVerifyPage()">Next Failed (None Remaining)</button>
+                    </div>
+                    <button class="toolbar-next" onclick="nextVerifyPage()">Next Page &rarr;</button>
+                </div>
             </div>
         </div>
         <div class="split-view">
@@ -284,21 +287,21 @@
         
         <!-- Step 1: Assign Names -->
         <div id="grade-step-1" class="grade-step hidden">
-            <div class="grade-toolbar">
-                <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <h2 style="margin:0;">Assign Student Names</h2>
-                    <div style="display:flex; flex-direction:column; gap:6px;">
-                        <button style="font-weight: bold;" onclick="finishNameAssn()">Continue to Grading &rarr;</button>
-                        <button id="save-work-btn-assign" style="font-weight: bold;" onclick="saveWork()">
-                            <span class="btn-spinner hidden" id="save-work-spinner-assign"></span>
-                            <span id="save-work-label-assign">Save Work</span>
-                        </button>
-                    </div>
+            <div class="grade-toolbar workspace-toolbar">
+                <h2 class="toolbar-title">Assign Student Names</h2>
+                <div class="toolbar-actions">
+                    <button style="font-weight: bold;" onclick="finishNameAssn()">Continue to Grading &rarr;</button>
+                    <button id="save-work-btn-assign" style="font-weight: bold;" onclick="saveWork()">
+                        <span class="btn-spinner hidden" id="save-work-spinner-assign"></span>
+                        <span id="save-work-label-assign">Save Work</span>
+                    </button>
                 </div>
-                <div style="display: flex; justify-content: center; align-items: center; gap: 10px;">
-                    <button id="btn-prev-assn-assign" onclick="prevAssn()">&larr; Prev Assn</button>
-                    <div id="assign-assn-dropdown" class="status-dropdown"></div>
-                    <button id="btn-next-assn-assign" onclick="nextAssn()">Next Assn &rarr;</button>
+                <div class="toolbar-nav">
+                    <div class="toolbar-nav-row">
+                        <button id="btn-prev-assn-assign" class="toolbar-prev" onclick="prevAssn()">&larr; Prev Assn</button>
+                        <div id="assign-assn-dropdown" class="status-dropdown"></div>
+                        <button id="btn-next-assn-assign" class="toolbar-next" onclick="nextAssn()">Next Assn &rarr;</button>
+                    </div>
                 </div>
             </div>
             <div class="split-view">
@@ -326,30 +329,33 @@
 
         <!-- Step 2: Grade Questions -->
         <div id="grade-step-2" class="grade-step hidden">
-            <div class="grade-toolbar">
-                <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <h2 style="margin:0;">Grade Questions</h2>
-                    <div style="display:flex; flex-direction:column; gap:6px;">
-                        <button style="font-weight: bold;" onclick="returnToNameAssn()">&larr; Return to Name Assignment</button>
-                        <button id="save-work-btn-grade" style="font-weight: bold;" onclick="saveWork()">
-                            <span class="btn-spinner hidden" id="save-work-spinner-grade"></span>
-                            <span id="save-work-label-grade">Save Work</span>
-                        </button>
-                        <button id="finish-export-btn" style="font-weight: bold;" onclick="finishGrading()">
-                            <span class="btn-spinner hidden" id="finish-export-spinner"></span>
-                            <span id="finish-export-label">Finish &amp; Export</span>
-                        </button>
+            <div class="grade-toolbar workspace-toolbar">
+                <h2 class="toolbar-title">Grade Questions</h2>
+                <div class="toolbar-actions">
+                    <button style="font-weight: bold;" onclick="returnToNameAssn()">&larr; Return to Name Assignment</button>
+                    <button id="save-work-btn-grade" style="font-weight: bold;" onclick="saveWork()">
+                        <span class="btn-spinner hidden" id="save-work-spinner-grade"></span>
+                        <span id="save-work-label-grade">Save Work</span>
+                    </button>
+                    <button id="finish-export-btn" style="font-weight: bold;" onclick="finishGrading()">
+                        <span class="btn-spinner hidden" id="finish-export-spinner"></span>
+                        <span id="finish-export-label">Finish &amp; Export</span>
+                    </button>
+                </div>
+                <div class="toolbar-nav">
+                    <div class="toolbar-nav-row">
+                        <button id="btn-prev-q" class="toolbar-prev" onclick="prevQ()">&larr; Prev Question</button>
+                        <div id="grade-q-dropdown" class="status-dropdown"></div>
+                        <button id="btn-next-q" class="toolbar-next" onclick="nextQ()">Next Question &rarr;</button>
                     </div>
-                </div>
-                <div style="display: flex; justify-content: center; align-items: center; gap: 10px;">
-                    <button id="btn-prev-q" onclick="prevQ()">&larr; Prev Question</button>
-                    <div id="grade-q-dropdown" class="status-dropdown"></div>
-                    <button id="btn-next-q" onclick="nextQ()">Next Question &rarr;</button>
-                </div>
-                <div style="display: flex; justify-content: center; align-items: center; gap: 10px;">
-                    <button id="btn-prev-assn-grade" onclick="prevGradeAssn()">&larr; Prev Assn</button>
-                    <div id="grade-assn-dropdown" class="status-dropdown"></div>
-                    <button id="btn-next-assn-grade" onclick="nextGradeAssn()">Next Assn &rarr;</button>
+                    <div class="toolbar-nav-row">
+                        <button id="btn-prev-assn-grade" class="toolbar-prev" onclick="prevGradeAssn()">&larr; Prev Assn</button>
+                        <div class="toolbar-dropdown-col">
+                            <div id="grade-assn-dropdown" class="status-dropdown"></div>
+                            <button id="btn-next-ungraded-grade" onclick="nextUngradedGradeAssn()">Next Ungraded for Question (None Remaining)</button>
+                        </div>
+                        <button id="btn-next-assn-grade" class="toolbar-next" onclick="nextGradeAssn()">Next Assn &rarr;</button>
+                    </div>
                 </div>
             </div>
             <div class="split-view">

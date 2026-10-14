@@ -102,6 +102,7 @@ function updateAssignDropdown() {
     renderStatusDropdown('assign-assn-dropdown', items, currentAssnIndex, jumpToAssignAssn);
     document.getElementById('btn-prev-assn-assign').disabled = (currentAssnIndex <= 0);
     document.getElementById('btn-next-assn-assign').disabled = (currentAssnIndex >= assnIds.length - 1);
+    fitWorkspaceToolbars();
 }
 
 function clearAssignNameWarning() {

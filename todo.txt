@@ -1,7 +1,6 @@
 - [ ] Data validation UI for namereader
 - [ ] moving to Use Sections (or back?) can preserve questions written thus far
 - [ ] user does not call close on web socket?
-- [ ] grading: When changing between questions, assn ID stays the same where possible (skip question when a certain assignment doesn't have it)
 - [ ] make sure to delete temp folders from julia and from archives
 - [ ] slide window resize between left and right
 - [ ] ability to copy notes from other file
@@ -13,9 +12,7 @@
 	- [ ] first load of directory/file select modal takes too long
 - [ ] initial "Verify Scans?" modal says how many need to be checked
 - [ ] Verify Scans shows count of how many need to be completed
-- [ ] Don't let arrow keys change score in grading
 - [ ] be able to manage google drive folders/files using auxilliary function?
-- [ ] "I couldn’t get the new version of Biscuit to open in browser even after waiting ~10min after launching the application, so I used the old version."
 - [ ] allow discard changes for moving away from verify scans
 - [ ] add (full points) option as alternative to (-N)?
 - [ ] why does it take so long to load files/folders first time?
@@ -28,8 +25,18 @@
 - [ ] instead of vars and secondary vars per question, generate global vars and allow arbitrary code
 - [ ] collapsable sections in assignment builder
 - [ ] change section # to match zero-indexing
+- [ ] ignore ctrl + S
+- [ ] hide section intros into plus symbols as is done overall
+- [ ] why does pdf conversion take so long
+- [ ] Merge Browse File and Browse Folder in Process Scan, allow selection of either, but not multiple files.
+- [ ] Move the "Next blah (x remaining)" buttons to be below the drop downs.
 
 COMPLETED, UNTESTED
+- [x] "next failed (x remain)" button, grey out when no more remain
+- [x] Don't let arrow keys change score in grading
+- [x] grading: When changing between questions, assn ID stays the same where possible (skip question when a certain assignment doesn't have it)
+- [x] status dropdowns open scrolled to the current option
+- [x] "I couldn’t get the new version of Biscuit to open in browser even after waiting ~10min after launching the application, so I used the old version."
 - [x] if feedback is just whitespace, don't render
 - [x] hitting home shows "save?" button
 - [x] Get rid of name guess csv or whatever, just put it in the gradingData thing

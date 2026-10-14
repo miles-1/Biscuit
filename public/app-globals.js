@@ -105,13 +105,19 @@ function initTheme() {
 
 initTheme();
 
-// Number inputs change value on mouse-wheel; disable that everywhere.
+// Number inputs change value on mouse-wheel and Up/Down arrows; disable that everywhere.
 document.addEventListener('wheel', (event) => {
     const t = event.target;
     if (!(t instanceof Element)) return;
     if (!t.closest('input[type="number"]')) return;
     event.preventDefault();
 }, { passive: false, capture: true });
+document.addEventListener('keydown', (event) => {
+    if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+    const t = event.target;
+    if (!(t instanceof Element) || !t.matches('input[type="number"]')) return;
+    event.preventDefault();
+}, { capture: true });
 
 // Shared message modal (replaces browser alert)
 function closeMessageModal() {

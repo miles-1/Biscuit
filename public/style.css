@@ -567,6 +567,47 @@ button:disabled { opacity: 0.55; cursor: default; }
     flex-direction: column;
     gap: 10px;
 }
+/* Stacked by default; `.is-wide` puts title | nav | actions on one row once it fits. */
+.workspace-toolbar {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    grid-template-areas: "title actions" "nav nav";
+    align-items: center;
+    gap: 10px 16px;
+}
+.workspace-toolbar.is-wide {
+    grid-template-columns: auto 1fr auto;
+    grid-template-areas: "title nav actions";
+}
+.workspace-toolbar button,
+.toolbar-title { white-space: nowrap; }
+.toolbar-title { grid-area: title; margin: 0; }
+.toolbar-actions { grid-area: actions; display: flex; flex-direction: column; gap: 6px; }
+.toolbar-nav {
+    grid-area: nav;
+    display: grid;
+    grid-template-columns: auto auto auto;
+    justify-content: center;
+    align-items: start;
+    gap: 10px;
+}
+.toolbar-nav-row { display: contents; }
+.toolbar-prev { justify-self: end; }
+.toolbar-next { justify-self: start; }
+.toolbar-dropdown-col { display: flex; flex-direction: column; gap: 6px; }
+
+/* Verify and grading fill the window below the top bar instead of a fixed 90vh. */
+body:has(> #verify-sec:not(.hidden)),
+body:has(> #grading-ui:not(.hidden)) {
+    height: calc(100vh - 40px);
+    display: flex;
+    flex-direction: column;
+}
+body:has(> #verify-sec:not(.hidden)) > .top-chrome,
+body:has(> #grading-ui:not(.hidden)) > .top-chrome { flex-shrink: 0; }
+body > #verify-sec:not(.hidden),
+body > #grading-ui:not(.hidden) { flex: 1; min-height: 0; height: auto; }
+
 .split-view { display: flex; flex-grow: 1; height: 100%; min-height: 0; overflow: hidden; }
 .left-pane {
     flex: 1;
@@ -844,7 +885,7 @@ input[type="number"].score-input {
 }
 .feedback-template-item {
     position: relative;
-    padding: 8px 28px 8px 10px;
+    padding: 8px 28px 8px 28px;
     border: 1px solid var(--border);
     border-radius: 8px;
     background: var(--bg-input);
@@ -874,6 +915,27 @@ input[type="number"].score-input {
 .feedback-template-remove:hover {
     color: #dc2626;
 }
+.feedback-template-edit {
+    position: absolute;
+    top: 4px;
+    left: 4px;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 15px;
+    font-style: normal;
+    line-height: 1;
+    cursor: pointer;
+}
+.feedback-template-edit:hover {
+    color: var(--text);
+}
+.feedback-template-item.dragging { opacity: 0.4; }
+.feedback-template-item.drop-before { box-shadow: 0 -3px 0 0 #2563eb; }
+.feedback-template-item.drop-after { box-shadow: 0 3px 0 0 #2563eb; }
 .grade-divider {
     border: none;
     border-top: 1px solid var(--border);

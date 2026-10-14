@@ -129,7 +129,34 @@ function isVerifyPageComplete(res) {
     return Boolean(res.identified && res.anchors_ok !== false);
 }
 
+function failedVerifyIndices() {
+    const failed = [];
+    verifyScanResults.forEach((res, i) => {
+        if (!isVerifyPageComplete(res)) failed.push(i);
+    });
+    return failed;
+}
+
+function updateVerifyNextFailedBtn() {
+    const btn = document.getElementById('verify-next-failed-btn');
+    if (!btn) return;
+    const remaining = failedVerifyIndices().length;
+    btn.textContent = `Next Failed (${remaining || 'None'} Remaining)`;
+    btn.disabled = remaining === 0;
+}
+
+function nextFailedVerifyPage() {
+    const failed = failedVerifyIndices();
+    if (failed.length === 0) return;
+    const next = failed.find(i => i > currentVerifyIndex) ?? failed[0];
+    if (next === currentVerifyIndex) return;
+    if (!confirmSaveDirtyVerifyPage()) return;
+    currentVerifyIndex = next;
+    renderVerifyPage();
+}
+
 function populateVerifyDropdown() {
+    updateVerifyNextFailedBtn();
     const items = verifyScanResults.map(res => ({
         label: `Page ${res.ppage_indx}`,
         isComplete: isVerifyPageComplete(res),
@@ -143,6 +170,7 @@ function populateVerifyDropdown() {
         currentVerifyIndex = index;
         renderVerifyPage();
     });
+    fitWorkspaceToolbars();
 }
 
 function prevVerifyPage() {
@@ -459,6 +487,16 @@ async function finalizeScans() {
         spinner.classList.add('hidden');
         label.textContent = 'Finalize Scans';
         if (activeProcessSocket === ws) activeProcessSocket = null;
+        const errorAt = fullOutput.startsWith('Error:') ? 0 : fullOutput.indexOf('\nError:');
+        if (errorAt >= 0) {
+            // Stay on the page so the corrections are not lost.
+            showMessageModal({
+                title: 'Finalize Failed',
+                message: 'Reprocessing scans failed, so the .assn file is incomplete:\n\n'
+                    + fullOutput.slice(errorAt).split(/\n\s*Stacktrace:/)[0].replace(/\s*Done\s*$/, '').trim(),
+            });
+            return;
+        }
         // process_scans rewrote the .assn archive in its own temp dir; drop the verify extract.
         await clearArchiveContext();
         resetVerifySessionState();

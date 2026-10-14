@@ -1458,12 +1458,9 @@ function apply_name_reader_guesses!(
         page_of[(assn_id, page)] = ppage
     end
 
-    pages = load_binary_pages(scan)
-    for i in eachindex(pages)
-        rotated = maybe_corrected_page(pages[i], corrections, i)
-        rotated === nothing && continue
-        pages[i] = rotated
-    end
+    # A rotated page is a plain Array, which cannot be stored back into the vector
+    # of OpenCV Mats that load_binary_pages returns.
+    pages = Any[something(maybe_corrected_page(p, corrections, i), p) for (i, p) in enumerate(load_binary_pages(scan))]
     extracted = extract_name_field_crops(pages, processed_assn_data; ppage_of=page_of)
     if isempty(extracted)
         println("NameReader: no name-field crops found (assignments need the Typst name-line marks).")

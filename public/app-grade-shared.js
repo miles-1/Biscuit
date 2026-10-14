@@ -114,7 +114,8 @@ function renderStatusDropdown(containerId, items, selectedIndex, onSelect) {
     btn.type = 'button';
     btn.className = 'status-dropdown-btn';
 
-    const selected = items[Math.max(0, Math.min(selectedIndex, items.length - 1))];
+    const selectedRow = Math.max(0, Math.min(selectedIndex, items.length - 1));
+    const selected = items[selectedRow];
     btn.innerHTML = `
         <span style="display:flex;align-items:center;gap:8px;">
             <img class="status-icon" src="${getStatusIconSrc(selected.isComplete)}" alt="">
@@ -146,12 +147,26 @@ function renderStatusDropdown(containerId, items, selectedIndex, onSelect) {
             if (m !== menu) m.classList.add('hidden');
         });
         menu.classList.toggle('hidden');
+        if (!menu.classList.contains('hidden')) {
+            menu.scrollTop = menu.children[selectedRow].offsetTop;
+        }
     };
 
     wrapper.appendChild(btn);
     wrapper.appendChild(menu);
     container.appendChild(wrapper);
 }
+
+// Put each visible workspace toolbar on one row (title | nav | actions) when everything fits,
+// otherwise fall back to the stacked layout. Call after anything that changes toolbar widths.
+function fitWorkspaceToolbars() {
+    document.querySelectorAll('.workspace-toolbar').forEach((bar) => {
+        if (bar.offsetParent === null) return;
+        bar.classList.add('is-wide');
+        if (bar.scrollWidth > bar.clientWidth) bar.classList.remove('is-wide');
+    });
+}
+window.addEventListener('resize', fitWorkspaceToolbars);
 
 function flattenQuestions(questions, qPath = "") {
     let result = {};
