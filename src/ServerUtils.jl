@@ -293,7 +293,6 @@ function _build_grading_data_from_archive()::Dict{Int64, Dict{String, Any}}
     master = _read_file_from_temp("master.json")
     selection = _read_file_from_temp("selection.json")
     page_elements = _read_file_from_temp("page_elements.json"; give_default=true)
-    var_answers = _read_file_from_temp("var_answers.json"; give_default=true)
     grading_data = Dict{Int64, Dict{String, Any}}()
 
     function flatten_master_questions(questions::AbstractVector, path::String="")::Vector{Dict{String, Any}}
@@ -484,13 +483,6 @@ function _build_grading_data_from_archive()::Dict{Int64, Dict{String, Any}}
                 )
             end
         end
-        # collect information from var_answers json
-        ver_var_answers = get(var_answers, assn_id, Dict())
-        @assert isa(ver_var_answers, Dict) "var_answers json value for assn_id $assn_id is not an object"
-        for (q_indx, answers) in pairs(ver_var_answers)
-            q_indx_int = parse(Int64, q_indx) + 1 # shift from zero-indexing
-            processed_questions[q_indx_int]["var_answer"] = answers
-        end
         # save questions for version
         entry = Dict{String, Any}("questions" => processed_questions)
         guessed = _name_from_processed_entry(processed_entry)
@@ -526,6 +518,79 @@ function _pad_processed_questions_for_missing_pages(processed_questions, assn_id
         end
     end
     return out
+end
+
+function _selection_question_paths(questions::AbstractVector, prefix::Vector{Int64}=Int64[])::Vector{Vector{Int64}}
+    paths = Vector{Vector{Int64}}()
+    for node in questions
+        path = [prefix; Int64(isa(node, Integer) ? node : node["indx"])]
+        if isa(node, AbstractDict) && haskey(node, "questions")
+            append!(paths, _selection_question_paths(node["questions"], path))
+        else
+            push!(paths, path)
+        end
+    end
+    return paths
+end
+
+_has_typed_answer(ca) = isa(ca, AbstractString) ? !isempty(strip(ca)) : (isa(ca, AbstractVector) && !isempty(ca))
+
+# Essay and fill-in-the-blank answers are Typst markup that can use each version's random values,
+# so every scanned version gets its own render. Identical SVGs are stored once, in `svgs`, and
+# `answers[assn_id][question_id]` is an index into it.
+function _build_answer_svgs_from_archive()::Dict{String, Any}
+    temp_dir = String(STATE["temp_archive_dir"])
+    master = _read_file_from_temp("master.json")
+    selection = _read_file_from_temp("selection.json")
+    processed = _read_file_from_temp("processed_assn_data.json")
+    answered_ids = Set{String}(
+        q["id"] for q in _flatten_master_questions_export(master["questions"])
+        if get(q, "type", "") in ("essay", "fill_blank") && _has_typed_answer(get(q, "correct_answer", nothing))
+    )
+    jobs = Dict{String, Any}[]
+    for ver in selection["versions"]
+        Bool(get(ver, "is_key", false)) && continue
+        haskey(processed, string(ver["assn_id"])) || continue
+        ids = [join(p, "-") for p in _selection_question_paths(ver["questions"]) if "q" * join(p, ".") in answered_ids]
+        isempty(ids) || push!(jobs, Dict{String, Any}("assn_id" => ver["assn_id"], "ids" => ids))
+    end
+    result = Dict{String, Any}(
+        "assn_ids" => collect(keys(processed)),
+        "svgs" => String[],
+        "answers" => Dict{String, Any}(),
+    )
+    isempty(jobs) && return result
+    # Typst only reads files under its root, which is the temp archive dir.
+    render_dir = mktempdir(temp_dir; prefix=".answers_")
+    try
+        jobs_file = joinpath(render_dir, "jobs.json")
+        open(jobs_file, "w") do f
+            json_print(f, jobs)
+        end
+        typst_compile_answer_svgs(;
+            work_dir=temp_dir,
+            master_file=joinpath(temp_dir, "master.json"),
+            selection_file=joinpath(temp_dir, "selection.json"),
+            jobs_file,
+            output_pattern=joinpath(render_dir, "answer-{p}.svg"),
+        )
+        svg_indices = Dict{String, Int}()
+        page = 0
+        for job in jobs
+            by_question = result["answers"][string(job["assn_id"])] = Dict{String, Any}()
+            for id in job["ids"]
+                page += 1
+                svg = read(joinpath(render_dir, "answer-$page.svg"), String)
+                by_question["q" * replace(id, "-" => ".")] = get!(svg_indices, svg) do
+                    push!(result["svgs"], svg)
+                    length(result["svgs"]) - 1
+                end
+            end
+        end
+    finally
+        rm(render_dir; recursive=true, force=true)
+    end
+    return result
 end
 
 function _flatten_master_questions_export(questions::AbstractVector, path::String="")::Vector{Dict{String, Any}}

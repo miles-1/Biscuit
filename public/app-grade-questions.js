@@ -813,13 +813,79 @@ function formatCorrectAnswerDisplay(answer) {
     return text.length ? text : null;
 }
 
-// For fill_blank / essay: prefer computed var_answer (from random params) over the static
-// master correct_answer (which may still contain unevaluated Typst expressions).
-function correctAnswerForDisplay(qType, currentItem) {
-    if (qType !== 'fill_blank' && qType !== 'essay') return null;
-    if (currentItem.var_answer !== undefined) return currentItem.var_answer;
-    if (currentItem.correct_answer !== undefined) return currentItem.correct_answer;
-    return null;
+// Rendered fill_blank / essay answers: {svgs: [svg text], answers: {assnId: {qId: index into svgs}}}.
+let answerSvgs = null;
+let answerSvgsError = null;
+let answerSvgsPromise = null;
+let answerSvgsLoadSeq = 0;
+let answerSvgUrls = [];
+
+function loadAnswerSvgs() {
+    const seq = ++answerSvgsLoadSeq;
+    answerSvgUrls.forEach((url) => url && URL.revokeObjectURL(url));
+    answerSvgUrls = [];
+    answerSvgs = null;
+    answerSvgsError = null;
+    answerSvgsPromise = fetch('/api/answer_svgs')
+        .then((res) => res.json())
+        .then((data) => {
+            if (seq !== answerSvgsLoadSeq) return;
+            if (data.status === 'error') throw new Error(data.message);
+            answerSvgs = data;
+        })
+        .catch((e) => {
+            if (seq === answerSvgsLoadSeq) answerSvgsError = e.message || String(e);
+        });
+}
+
+function answerSvgUrl(assnId, qId) {
+    const idx = answerSvgs?.answers?.[assnId]?.[qId];
+    if (idx === undefined) return null;
+    if (!answerSvgUrls[idx]) {
+        answerSvgUrls[idx] = URL.createObjectURL(new Blob([answerSvgs.svgs[idx]], { type: 'image/svg+xml' }));
+    }
+    return answerSvgUrls[idx];
+}
+
+// Typst SVGs reuse glyph ids, so each goes in its own <img> rather than inline in the page.
+function renderTypedCorrectAnswer(assnId, qId, currentItem) {
+    const source = formatCorrectAnswerDisplay(currentItem.correct_answer);
+    if (source === null) return null;
+    const block = document.createElement('div');
+    block.classList.add('correct-answer-block');
+    const label = document.createElement('b');
+    label.textContent = 'Correct Answer:';
+    block.appendChild(label);
+
+    const url = answerSvgUrl(assnId, qId);
+    if (url) {
+        const img = document.createElement('img');
+        img.classList.add('correct-answer-svg');
+        img.src = url;
+        img.alt = source;
+        block.appendChild(img);
+        return block;
+    }
+
+    const isLoading = !answerSvgs && !answerSvgsError;
+    const note = document.createElement('div');
+    note.classList.add('correct-answer-note');
+    note.textContent = isLoading
+        ? 'Rendering correct answers…'
+        : `Could not render this answer, so its Typst source is shown.${answerSvgsError ? `\n${answerSvgsError}` : ''}`;
+    block.appendChild(note);
+    if (!isLoading) {
+        const text = document.createElement('pre');
+        text.classList.add('correct-answer-text');
+        text.textContent = source;
+        block.appendChild(text);
+    }
+    if (isLoading && answerSvgsPromise) {
+        answerSvgsPromise.then(() => {
+            if (block.isConnected) block.replaceWith(renderTypedCorrectAnswer(assnId, qId, currentItem));
+        });
+    }
+    return block;
 }
 
 async function renderGradeStep() {
@@ -844,18 +910,9 @@ async function renderGradeStep() {
         note.textContent = 'Participation question: any answer receives full credit; unanswered scores 0.';
         infoEl.appendChild(note);
     }
-    const displayAnswer = formatCorrectAnswerDisplay(correctAnswerForDisplay(qType, currentItem));
-    if (displayAnswer !== null) {
-        const block = document.createElement('div');
-        block.classList.add('correct-answer-block');
-        const label = document.createElement('b');
-        label.textContent = 'Correct Answer:';
-        const text = document.createElement('pre');
-        text.classList.add('correct-answer-text');
-        text.textContent = displayAnswer;
-        block.appendChild(label);
-        block.appendChild(text);
-        infoEl.appendChild(block);
+    if (qType === 'fill_blank' || qType === 'essay') {
+        const answerBlock = renderTypedCorrectAnswer(currentAssnIdForQ, questionIds[currentQIndex], currentItem);
+        if (answerBlock) infoEl.appendChild(answerBlock);
     }
     setAssnScan(currentAssnIdForQ, currentItem.page, currentItem.q_height, false).catch(err => {
         console.error(err);

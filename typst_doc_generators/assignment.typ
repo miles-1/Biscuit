@@ -1,7 +1,7 @@
 // misc
 #let BUBBLE = [#circle(radius:4pt)<bubble>]
 #let BUBBLE_FILLED = circle(radius:4pt, fill:black)
-#let BLANK = box(inset: (bottom: -2pt), line(length: 30%))
+#let BLANK = [#box(inset: (bottom: -2pt), line(length: 30%))<blank>]
 #let TRAINING_DATA_NAME_BOXES = align(center, block(stroke:black, inset:20pt, fill:tiling(size:(10pt,10pt), {
   place(line(stroke:luma(50%),start:(0%,0%), end:(100%,100%))); place(line(stroke:luma(50%),start:(0%,100%), end:(100%,0%)))}), table(gutter:20pt, inset:2pt, columns:(200pt,)*2, rows:(40pt,)*6, fill:white, ..for _ in range(12) {(for pos in (top+left, top+right, bottom+left, bottom+right) {place(pos, [#box()<name_box_corner>])},)})))
 #let anchor = [#square(width: 5pt, fill:black)<anchor>]
@@ -10,34 +10,31 @@
 #let apply(val_or_array, func) = if type(val_or_array) == array {val_or_array.map(func)} else {func(val_or_array)}
 #let linspace(start, end, count) = range(count).map(i => {start + i * (end - start) / (count - 1)})
 #let lpad(body, length, char: "0") = {let string = str(body); while string.len() < length {string = char + string}; return string}
-#let eval_mkup(string, global_vars:none, vars:none, secondary_vars:none, type:none) = {
-  let scope = if std.type(global_vars) == dictionary {global_vars} else {(:)}
-  scope += vars + secondary_vars
+#let eval_mkup(string, scope:(:), type:none) = {
   if type == "fill_blank" {scope.insert("BLANK", BLANK)}
   if type == "essay" {scope.insert("TRAINING_DATA_NAME_BOXES", TRAINING_DATA_NAME_BOXES)}
   eval(string, mode:"markup", scope:scope)
 }
-#let eval_code(string, global_vars:none, vars:none, secondary_vars:none) = {
-  let scope = if type(global_vars) == dictionary {global_vars} else {(:)}
-  scope += vars + secondary_vars
-  eval(string, scope:scope)
-}
-#let to-string(it) = {
-  if type(it) == str {
-    it
-  } else if type(it) != content {
-    str(it)
-  } else if it.has("text") {
-    it.text
-  } else if it.has("children") {
-    it.children.map(to-string).join()
-  } else if it.has("body") {
-    to-string(it.body)
-  } else if it == [ ] {
-    " "
-  } else {
-    "[UNRESOLVED TEXT]"
+// Everything a version's markup can reference: its sampled random vars, plus the dictionary that
+// the general vars code returns (that code sees the random vars too).
+#let build_var_scope(global_vars, random_values) = {
+  let scope = if type(random_values) == dictionary {random_values} else {(:)}
+  if type(global_vars) != str or global_vars.trim() == "" {return scope}
+  let general = eval(global_vars, scope:scope)
+  // `(` and `)` around nothing but comments is an empty array, not an empty dictionary.
+  if general == () {return scope}
+  assert(type(general) == dictionary, message:"global vars must evaluate to a dictionary, e.g. `(a: 1234)`, but got " + repr(type(general)))
+  for k in general.keys() {
+    assert(k not in scope, message:"global var `" + k + "` has the same name as a random var")
   }
+  scope + general
+}
+#let random_values_box(random_vars, random_values) = {
+  if type(random_vars) != array or random_vars.len() == 0 or type(random_values) != dictionary {return}
+  block(stroke:red + 0.5pt, inset:6pt, radius:3pt, text(red, {
+    strong[Random values used in this key: ]
+    random_vars.map(spec => [#raw(spec.name) = #str(random_values.at(spec.name, default:"?"))]).join([, ])
+  }))
 }
 
 // data matrix
@@ -167,19 +164,18 @@
   par_leading: 1.2em,
   {
     let is_key = args.named().at("is_key", default:false)
-    if is_key {
-      let correct_answer = args.named().at("correct_answer", default:none)
-      let blank_count = counter("BLANK")
-      blank_count.update(0)
-      show regex("\#BLANK"): it => {
-        blank_count.step()
-        if correct_answer == none {
-          BLANK
-        } else if type(correct_answer) != array {
-          key_answer(correct_answer)
-        } else {
-          context key_answer(correct_answer.at(blank_count.get().first() - 1))
-        }
+    let correct_answer = args.named().at("correct_answer", default:none)
+    let blank_count = counter("BLANK")
+    blank_count.update(0)
+    // The body is already evaluated, so each `#BLANK` is a labelled box rather than text. The rule
+    // has to sit at this level: inside an `if` block it would end with that block.
+    show <blank>: it => {
+      if not is_key or correct_answer == none {return it}
+      blank_count.step()
+      if type(correct_answer) != array {
+        key_answer(correct_answer)
+      } else {
+        context key_answer(correct_answer.at(blank_count.get().first() - 1))
       }
     }
     body
@@ -197,40 +193,23 @@
 )
 
 // traversing json
-#let get_single_selected_question(m_q, s_q, id:"", global_vars:none, is_key:false) = {
-  let (option_permutation, vars, type) = get_all(s_q, "option_permutation", "vars", "type")
-  let (secondary_vars, type, options, correct_answer) = get_all(m_q, "secondary_vars", "type", "options", "correct_answer")
-  let defines_vars = std.type(m_q.at("vars", default: none)) == dictionary
-  let is_eval_mkup = not is_key or not defines_vars
-  if std.type(vars) == dictionary {
-    m_q.vars = vars
-    if std.type(secondary_vars) == dictionary {
-      let evald_secondary_vars = (:)
-      for (k,v) in secondary_vars.pairs() {
-        evald_secondary_vars.insert(k, eval_code(v, global_vars:global_vars, vars:vars, secondary_vars:evald_secondary_vars))
-      }
-      secondary_vars = evald_secondary_vars
-      m_q.secondary_vars = secondary_vars
-    }
-  }
-  if is_eval_mkup {
-    m_q.body = eval_mkup(m_q.body, global_vars:global_vars, vars:vars, secondary_vars:secondary_vars, type:type)
-  }
+#let get_single_selected_question(m_q, s_q, id:"", scope:(:)) = {
+  let option_permutation = s_q.at("option_permutation", default:none)
+  let (type, options, correct_answer) = get_all(m_q, "type", "options", "correct_answer")
+  m_q.body = eval_mkup(m_q.body, scope:scope, type:type)
   if options != none {
     if option_permutation != none {
       options = option_permutation.map(i=>options.at(i))
     }
-    if is_eval_mkup {
-      m_q.options = options.map(eval_mkup.with(global_vars:global_vars, vars:vars, secondary_vars:secondary_vars))
-    }
+    m_q.options = options.map(eval_mkup.with(scope:scope))
   }
-  if correct_answer != none and is_eval_mkup and type in ("essay", "fill_blank") {
-    m_q.correct_answer = apply(correct_answer, eval_mkup.with(global_vars:global_vars, vars:vars, secondary_vars:secondary_vars))
+  if correct_answer != none and type in ("essay", "fill_blank") {
+    m_q.correct_answer = apply(correct_answer, eval_mkup.with(scope:scope))
   }
   m_q.insert("id", id)
   return (m_q,)
 }
-#let get_selected_questions(m_dict, s_dict, is_top_level:true, global_vars:none, is_key:false, id:"") = {
+#let get_selected_questions(m_dict, s_dict, is_top_level:true, scope:(:), id:"") = {
   let m_qs = m_dict.at("questions", default:none)
   let s_qs = s_dict.at("questions", default:none)
   let has_sections = is_top_level and "section_title" in m_qs.first()
@@ -244,10 +223,10 @@
       let intro = m_q.at("intro_content", default:none)
       (
         (
-          section_title: eval_mkup(global_vars:global_vars, m_q.section_title),
-          intro_content: if intro != none and intro != "" {eval_mkup(global_vars:global_vars, intro)} else {none},
+          section_title: eval_mkup(scope:scope, m_q.section_title),
+          intro_content: if intro != none and intro != "" {eval_mkup(scope:scope, intro)} else {none},
         ),
-        ..get_selected_questions(m_q, s_q, id:str(indx), global_vars:global_vars, is_key:is_key, is_top_level:false)
+        ..get_selected_questions(m_q, s_q, id:str(indx), scope:scope, is_top_level:false)
       )
     }
   }
@@ -257,9 +236,9 @@
     let (indx,) = s_q
     let m_q = m_qs.at(indx)
     if "questions" not in s_q {
-      get_single_selected_question(m_q, s_q, id:id+str(indx), global_vars:global_vars, is_key:is_key)
+      get_single_selected_question(m_q, s_q, id:id+str(indx), scope:scope)
     } else {
-      get_selected_questions(m_q, s_q, id:id+str(indx), global_vars:global_vars, is_key:is_key)
+      get_selected_questions(m_q, s_q, id:id+str(indx), scope:scope)
     }
   }
 }
@@ -267,22 +246,21 @@
 #let assn_versions(master, selection, single_doc_export, will_print_double_sided) = {
   // unpack from master and selection
   let make_doc = if single_doc_export {(title, body) => {body}} else {document}
-  let (title, intro_content, questions, margin, section_numbering, global_vars) = get_all(master, "title", "intro_content", "questions", "margin", "section_numbering", "global_vars")
-  margin = if margin != none {calc.max(margin,1.5)*1cm} else {1.5cm}
+  let (title, intro_content, questions, global_vars, random_vars) = get_all(master, "title", "intro_content", "questions", "global_vars", "random_vars")
   let versions = selection.at("versions", default:none)
-  if type(global_vars) == str {global_vars = eval_code(global_vars)}
   // doc set up
-  set page(paper:"us-letter", margin:margin, numbering:"(1)")
+  set page(paper:"us-letter", margin:1.5cm, numbering:"(1)")
   let section_q_counter = counter("section_q_counter")
   let total_q_counter = counter("total_q_counter")
   let assn_id_state = state("assn_id", -1)
-  let var_answers_state = state("var_answers", (:))
-  set heading(numbering:section_numbering)
+  set heading(numbering:"[1]")
   show heading.where(level: 1): it => {section_q_counter.update(0); it}
   // make each version
   for v in versions {
     let is_key = v.at("is_key", default:false)
     let assn_id = v.at("assn_id", default:none)
+    let random_values = v.at("vars", default:none)
+    let scope = build_var_scope(global_vars, random_values)
     if assn_id != none {assn_id_state.update(assn_id)}
     make_doc(
       "assn_" + if assn_id != none {lpad(assn_id, 4)} else {"_key"} + ".pdf",
@@ -311,8 +289,9 @@
             }
           }
         )
-        pad(right:270pt, std.title(eval_mkup(global_vars:global_vars, title)))
-        if intro_content != none {eval_mkup(global_vars:global_vars, intro_content)}
+        pad(right:270pt, std.title(eval_mkup(scope:scope, title)))
+        if intro_content != none {eval_mkup(scope:scope, intro_content)}
+        if is_key {random_values_box(random_vars, random_values)}
         place(top+right, dy:-30pt, dx:10pt, [
           #box(text(16pt, baseline:-15pt, strong[Name: ]))
           #box(width:200pt, height:55pt, {
@@ -322,7 +301,7 @@
             place(bottom+left, dy:-13pt, line(length: 100%))
           })
         ])
-        let qs = get_selected_questions(master, v, global_vars:global_vars, is_key:is_key)
+        let qs = get_selected_questions(master, v, scope:scope)
         for q in qs {
           if type(q) == dictionary and "section_title" in q {
             heading(q.section_title)
@@ -333,7 +312,7 @@
           if type(q) != dictionary {heading(q);std.v(5mm,weak:true);continue}
           total_q_counter.step()
           assert("type" in q and "body" in q, message:"all questions must have the `type` and `body` keys specified")
-          let (type, body, id, points, correct_answer, options, vars, secondary_vars) = get_all(q, "type", "body", "id", "points", "correct_answer", "options", "vars", "secondary_vars")
+          let (type, body, id, points, correct_answer, options) = get_all(q, "type", "body", "id", "points", "correct_answer", "options")
           let func = (
             multiple_choice: multiple_choice,
             true_false: true_false,
@@ -341,16 +320,6 @@
             essay: essay
           ).at(type)
           let extra_args = if type == "essay" {(num_lines: q.at("num_lines", default:none))} else {(:)}
-          if not is_key and type in ("essay", "fill_blank") and vars != none {
-            context {
-              let current_q_num = str(total_q_counter.get().first() - 1)
-              var_answers_state.update(d => {
-                if str(assn_id) not in d {d.insert(str(assn_id), (:))}
-                d.at(str(assn_id)).insert(current_q_num, apply(correct_answer, to-string))
-                return d
-              })
-            }
-          }
           func(
             body,
             id: id,
@@ -398,7 +367,6 @@
       page_elems.at(assn_id).at(p_indx).at(el_type + "s").push((x+shift,y+shift))
     }
     [#metadata(page_elems)<page_elems>]
-    [#metadata(var_answers_state.final())<var_answers>]
   } 
 }
 

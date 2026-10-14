@@ -5,7 +5,7 @@ using ..ArchiveUtils
 using ..JsonIO
 using ..Commands
 
-export generate_assn_files, validate_master_json, validate_master_json_file, preview_selection_for_question
+export generate_assn_files, validate_master_json, validate_master_json_file, sample_version_random_vars
 
 ### Make selection.json ###
 
@@ -40,24 +40,36 @@ function _require_allowed_and_required_keys(obj::Dict, path::String, allowed::Se
     return nothing
 end
 
-function _validate_vars_object(vars_obj, path::String)::Nothing
-    if !isa(vars_obj, Dict)
-        _validation_error(path, "`vars` must be an object.")
+# Typst identifiers (hyphens allowed), minus the names markup scopes already bind.
+const RANDOM_VAR_NAME_RE = r"^[A-Za-z_][A-Za-z0-9_-]*$"
+const RESERVED_VAR_NAMES = Set(["BLANK", "TRAINING_DATA_NAME_BOXES"])
+
+function _validate_random_vars(random_vars, path::String)::Nothing
+    if !isa(random_vars, AbstractVector)
+        _validation_error(path, "must be an array of random variable objects.")
     end
-    for (var_name, var_spec) in vars_obj
-        var_path = "$path.$var_name"
-        if isa(var_spec, AbstractVector)
-            if !all(v -> isa(v, Number) || isa(v, AbstractString), var_spec)
-                _validation_error(var_path, "array values must be numbers or strings.")
-            end
-            continue
-        end
+    seen = Set{String}()
+    for (i, var_spec) in enumerate(random_vars)
+        var_path = "$path[$i]"
         if !isa(var_spec, Dict)
-            _validation_error(var_path, "must be either an array (numbers/strings) or an object with `type`, `min`, and `max`.")
+            _validation_error(var_path, "must be an object with `name`, `type`, `min`, and `max`.")
         end
-        allowed = Set(["type", "min", "max", "digits"])
-        required = Set(["type", "min", "max"])
+        allowed = Set(["name", "type", "min", "max", "digits"])
+        required = Set(["name", "type", "min", "max"])
         _require_allowed_and_required_keys(var_spec, var_path, allowed, required)
+
+        name = var_spec["name"]
+        if !isa(name, AbstractString) || !occursin(RANDOM_VAR_NAME_RE, name)
+            _validation_error("$var_path.name", "must start with a letter or underscore and contain only letters, digits, `_`, or `-`.")
+        end
+        if name in RESERVED_VAR_NAMES
+            _validation_error("$var_path.name", "`$name` is reserved.")
+        end
+        if name in seen
+            _validation_error("$var_path.name", "`$name` is used by more than one random variable.")
+        end
+        push!(seen, name)
+        var_path = "$path.$name"
 
         typ = get(var_spec, "type", nothing)
         if typ != "int" && typ != "float"
@@ -160,18 +172,6 @@ function _validate_rubric_item(item, r_path::String)::Float64
     return max_f
 end
 
-function _validate_secondary_vars_object(sec_vars_obj, path::String)::Nothing
-    if !isa(sec_vars_obj, Dict)
-        _validation_error(path, "`secondary_vars` must be an object.")
-    end
-    for (k, v) in sec_vars_obj
-        if !isa(v, AbstractString)
-            _validation_error("$path.$k", "value must be a string with valid typst code in code mode.")
-        end
-    end
-    return nothing
-end
-
 function _is_pick_object(obj)::Bool
     return isa(obj, Dict) && haskey(obj, "pick")
 end
@@ -202,7 +202,7 @@ function _validate_question_object(q_obj, path::String)::Nothing
         _validation_error("$path.type", "must be one of `essay`, `fill_blank`, `multiple_choice`, or `true_false`.")
     end
 
-    common_allowed = Set(["type", "points", "body", "vars", "secondary_vars", "correct_answer", "shuffle_questions", "shuffle_answers"])
+    common_allowed = Set(["type", "points", "body", "correct_answer", "shuffle_questions", "shuffle_answers"])
     type_allowed = if q_type == "essay"
         union(common_allowed, Set(["rubric", "num_lines"]))
     elseif q_type == "fill_blank"
@@ -229,14 +229,6 @@ function _validate_question_object(q_obj, path::String)::Nothing
         if !_is_nonnegative_integer(q_obj["num_lines"])
             _validation_error("$path.num_lines", "must be a nonnegative integer.")
         end
-    end
-
-    if haskey(q_obj, "vars")
-        _validate_vars_object(q_obj["vars"], "$path.vars")
-    end
-
-    if haskey(q_obj, "secondary_vars")
-        _validate_secondary_vars_object(q_obj["secondary_vars"], "$path.secondary_vars")
     end
 
     _validate_optional_shuffle_flags(q_obj, path)
@@ -368,13 +360,12 @@ function validate_master_json(master::Dict{String, Any})::Nothing
         "assn_type",
         "title",
         "intro_content",
-        "margin",
-        "section_numbering",
         "shuffle_questions",
         "shuffle_answers",
         "shuffle_sections",
         "version_count",
         "seed",
+        "random_vars",
         "global_vars",
         "single_doc_export",
         "will_print_double_sided",
@@ -393,15 +384,6 @@ function validate_master_json(master::Dict{String, Any})::Nothing
     if haskey(master, "intro_content") && !isa(master["intro_content"], AbstractString)
         _validation_error("root.intro_content", "should be a string with valid typst markup.")
     end
-    if haskey(master, "margin")
-        margin = master["margin"]
-        if !_is_number(margin) || !(1.5 <= margin <= 3.0)
-            _validation_error("root.margin", "must be a number between 1.5 and 3.")
-        end
-    end
-    if haskey(master, "section_numbering") && !isa(master["section_numbering"], AbstractString)
-        _validation_error("root.section_numbering", "should be a string with valid typst numbering.")
-    end
     _validate_optional_shuffle_flags(master, "root")
     if haskey(master, "shuffle_sections") && !isa(master["shuffle_sections"], Bool)
         _validation_error("root.shuffle_sections", "must be a boolean.")
@@ -411,6 +393,9 @@ function validate_master_json(master::Dict{String, Any})::Nothing
     end
     if haskey(master, "seed") && !_is_positive_integer(master["seed"])
         _validation_error("root.seed", "must be a positive integer.")
+    end
+    if haskey(master, "random_vars")
+        _validate_random_vars(master["random_vars"], "root.random_vars")
     end
     if haskey(master, "global_vars") && !isnothing(master["global_vars"]) && !isa(master["global_vars"], AbstractString)
         _validation_error("root.global_vars", "should be a string with valid typst code that gives a typst dictionary.")
@@ -541,27 +526,6 @@ function process_node(node::Dict, index::Int, is_key::Bool, rng::AbstractRNG, co
                 end
             end
 
-            if haskey(node, "vars")
-                vars_dict = Dict{String, Any}()
-                for (k, v) in node["vars"]
-                    if isa(v, AbstractVector)
-                        vars_dict[k] = rand(rng, v)
-                    elseif isa(v, Dict)
-                        min_val = v["min"]
-                        max_val = v["max"]
-                        if v["type"] == "int"
-                            vars_dict[k] = rand(rng, Int(min_val):Int(max_val))
-                        elseif v["type"] == "float"
-                            digits = get(v, "digits", 2)
-                            val = rand(rng) * (Float64(max_val) - Float64(min_val)) + Float64(min_val)
-                            vars_dict[k] = round(val; digits)
-                        end
-                    end
-                end
-                res["vars"] = vars_dict
-                needs_dict = true
-            end
-
             if needs_dict
                 res["indx"] = index
                 return res
@@ -594,18 +558,35 @@ function process_top_level_questions(questions, is_key::Bool, rng::AbstractRNG, 
     return [process_node(questions[i + 1], i, is_key, rng, config) for i in indices]
 end
 
-# One sampled selection node for live builder preview (canonical option order, frozen vars).
-function preview_selection_for_question(question::Dict; seed::Integer=1234)
-    rng = Xoshiro(Int64(seed))
-    q = Dict{String, Any}(question)
-    delete!(q, "shuffle_questions")
-    delete!(q, "shuffle_answers")
-    config = (shuffle_q=false, shuffle_a=false)
-    result = process_node(q, 0, false, rng, config)
-    return isa(result, Dict) ? result : Dict{String, Any}("indx" => 0)
+function _sample_random_vars(random_vars::AbstractVector, rng::AbstractRNG)::Dict{String, Any}
+    values = Dict{String, Any}()
+    for spec in random_vars
+        min_val = spec["min"]
+        max_val = spec["max"]
+        values[spec["name"]] = if spec["type"] == "int"
+            rand(rng, Int(min_val):Int(max_val))
+        else
+            val = rand(rng) * (Float64(max_val) - Float64(min_val)) + Float64(min_val)
+            round(val; digits=get(spec, "digits", 2))
+        end
+    end
+    return values
 end
 
-function generate_selection_json(; master_file::String, output_dir::String, preview::Bool=false)::String
+# Random values for student versions 0..count-1. They come from their own RNG stream, so adding or
+# editing a random var does not change which questions or option orders a version gets.
+function sample_version_random_vars(master::AbstractDict, count::Integer)::Vector{Dict{String, Any}}
+    random_vars = get(master, "random_vars", Any[])
+    rng = Xoshiro(get(master, "seed", 1234))
+    return [_sample_random_vars(random_vars, rng) for _ in 1:count]
+end
+
+# `preview_kind` is "key" or "example" to render only that one version (example = student version 0).
+function generate_selection_json(;
+    master_file::String,
+    output_dir::String,
+    preview_kind::Union{Nothing, String}=nothing,
+)::String
     master = json_parsefile(master_file)
     output_file = joinpath(output_dir, "selection.json")
     seed = get(master, "seed", 1234)
@@ -614,34 +595,40 @@ function generate_selection_json(; master_file::String, output_dir::String, prev
     shuffle_a = Bool(get(master, "shuffle_answers", false))
     shuffle_sections = Bool(get(master, "shuffle_sections", false))
     version_count = get(master, "version_count", 1)
-    if preview && version_count > 0
+    if !isnothing(preview_kind)
         version_count = 1
     end
+    has_random_vars = !isempty(get(master, "random_vars", Any[]))
+    # The key shows version 0's values, so there is always at least one draw.
+    version_values = sample_version_random_vars(master, max(version_count, 1))
     config = (; shuffle_q, shuffle_a, shuffle_sections)
     questions = master["questions"]
-    versions = []
-    key_version = Dict(
+    key_version = Dict{String, Any}(
         "is_key" => true,
         "questions" => process_top_level_questions(questions, true, rng, config),
     )
+    has_random_vars && (key_version["vars"] = version_values[1])
     student_versions = []
     for assn_id in 0:(version_count - 1)
-        push!(student_versions, Dict(
+        version = Dict{String, Any}(
             "assn_id" => assn_id,
             "questions" => process_top_level_questions(questions, false, rng, config),
-        ))
+        )
+        has_random_vars && (version["vars"] = version_values[assn_id + 1])
+        push!(student_versions, version)
     end
-    # Preview shows a student copy first so shuffle is visible; generate keeps key first.
-    if preview
-        append!(versions, student_versions)
-        push!(versions, key_version)
+    versions = if preview_kind == "key"
+        [key_version]
+    elseif preview_kind == "example"
+        student_versions[1:1]
     else
-        push!(versions, key_version)
-        append!(versions, student_versions)
+        Any[key_version, student_versions...]
     end
     selection = Dict("versions" => versions)
     open(output_file, "w") do f; json_print(f, selection) end
-    println("Created: selection.json - $version_count student version(s) and 1 key")
+    if isnothing(preview_kind)
+        println("Created: selection.json - $version_count student version(s) and 1 key")
+    end
     return output_file
 end
 
@@ -686,14 +673,6 @@ function generate_page_elements_json(; master_file::String, selection_file::Stri
     return nothing
 end
 
-function generate_var_answers_json(; master_file::String, selection_file::String, output_dir::String)::Nothing
-    query_output = typst_query_assn(; master_file, selection_file, label="var_answers")
-    output_file = joinpath(output_dir, "var_answers.json")
-    write(output_file, query_output)
-    println("Created: var_answers.json")
-    return nothing
-end
-
 ### Main ###
 
 function generate_assn_files(
@@ -725,7 +704,6 @@ function generate_assn_files(
         selection_file = generate_selection_json(; master_file, output_dir=temp_dir)
         generate_pdf(; master_file, selection_file, single_doc_export, will_print_double_sided)
         generate_page_elements_json(; master_file, selection_file, output_dir=temp_dir)
-        generate_var_answers_json(; master_file, selection_file, output_dir=temp_dir)
         create_archive(;
             archive_path=assn_versions_file,
             master_file,

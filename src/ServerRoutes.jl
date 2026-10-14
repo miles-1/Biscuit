@@ -433,6 +433,29 @@ end
     ], read(page_file))
 end
 
+# Kept out of grading_data.json because the client re-sends that whole file on every save.
+@get "/api/answer_svgs" function(req::HTTP.Request)
+    temp_dir = STATE["temp_archive_dir"]
+    if isnothing(temp_dir)
+        return Dict("status" => "error", "message" => "No archive loaded")
+    end
+    cache_file = joinpath(temp_dir, "answer_svgs.json")
+    try
+        processed_ids = Set(String.(collect(keys(_read_file_from_temp("processed_assn_data.json")))))
+        is_current = isfile(cache_file) &&
+            processed_ids ⊆ Set(String.(get(json_parsefile(cache_file), "assn_ids", String[])))
+        if !is_current
+            answer_svgs = _build_answer_svgs_from_archive()
+            open(cache_file, "w") do f
+                json_print(f, answer_svgs)
+            end
+        end
+        return HTTP.Response(200, ["Content-Type" => "application/json"], read(cache_file))
+    catch e
+        return Dict("status" => "error", "message" => "Could not render correct answers:\n$(sprint(showerror, e))")
+    end
+end
+
 @post "/api/save_grading_data" function(req::HTTP.Request)
     grading_data = Oxygen.json(req)
     temp_dir = STATE["temp_archive_dir"]
@@ -1102,7 +1125,7 @@ end
             selection_file = GenerateAssnFiles.generate_selection_json(;
                 master_file=master_file_path,
                 output_dir=preview_dir,
-                preview=true,
+                preview_kind=get(data, "is_key", true) == true ? "key" : "example",
             )
 
             source_file = Commands.assn_typst_file()
@@ -1201,27 +1224,26 @@ end
     end
     global_vars_str = isa(global_vars, AbstractString) ? String(global_vars) : ""
 
-    margin = get(data, "margin", 1.5)
-    if !(isa(margin, Number) && isfinite(Float64(margin)))
-        return Dict("status" => "error", "message" => "`margin` must be a number.")
-    end
     seed = get(data, "seed", 1234)
     if !(isa(seed, Integer) && seed > 0)
         seed = 1234
     end
     is_key = Bool(get(data, "is_key", true))
 
-    selection = try
-        preview_selection_for_question(question; seed=Int64(seed))
+    random_vars = _normalize_json_types(get(data, "random_vars", Any[]))
+    random_values = try
+        GenerateAssnFiles._validate_random_vars(random_vars, "random_vars")
+        sample_version_random_vars(Dict{String, Any}("random_vars" => random_vars, "seed" => seed), 1)[1]
     catch e
-        return Dict("status" => "error", "message" => "Could not sample question variables:\n$(sprint(showerror, e))")
+        msg = replace(sprint(showerror, e), r"^ArgumentError:\s*" => "")
+        return Dict("status" => "error", "message" => msg)
     end
 
     preview_payload = Dict{String, Any}(
         "question" => question,
-        "selection" => selection,
         "global_vars" => isempty(strip(global_vars_str)) ? nothing : global_vars_str,
-        "margin" => Float64(margin),
+        "random_vars" => random_vars,
+        "vars" => random_values,
         "is_key" => is_key,
     )
     payload_hash = _json_cache_key(preview_payload)

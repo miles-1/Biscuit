@@ -17,12 +17,8 @@
 - [ ] add (full points) option as alternative to (-N)?
 - [ ] why does it take so long to load files/folders first time?
 - [ ] keyboard shortcuts like alt + up/down, ctrl + D, etc
-- [ ] toggle preview option between seeing example and key
 - [ ] preview test & section intros
-- [ ] better interface for vars and secondary_vars
-- [ ] maybe better to just export small svgs or html for keys so its formatted
 - [ ] generate random arrays of numbers option
-- [ ] instead of vars and secondary vars per question, generate global vars and allow arbitrary code
 - [ ] collapsable sections in assignment builder
 - [ ] change section # to match zero-indexing
 - [ ] ignore ctrl + S
@@ -30,8 +26,15 @@
 - [ ] why does pdf conversion take so long
 - [ ] Merge Browse File and Browse Folder in Process Scan, allow selection of either, but not multiple files.
 - [ ] Move the "Next blah (x remaining)" buttons to be below the drop downs.
+- [ ] offending anchors highlighted differently in Verify Scans, live update of if they will be rejected in the reverify, way to force accept anchors, error if reverify doesn't work
+- [ ] way to edit scans of particular pages in grading?
 
 COMPLETED, UNTESTED
+- [x] toggle preview option between seeing example and key
+- [x] instead of vars and secondary vars per question, generate global vars and allow arbitrary code (Global Vars panel: random vars + general vars)
+- [x] keys render random-var questions with version 0's values, listed at the top of the key
+- [x] fill-in-the-blank / essay correct answers are Typst markup; grading shows them as rendered SVGs
+- [x] remove Margin and Section Numbering from the builder (hard-coded 1.5cm and [1])
 - [x] "next failed (x remain)" button, grey out when no more remain
 - [x] Don't let arrow keys change score in grading
 - [x] grading: When changing between questions, assn ID stays the same where possible (skip question when a certain assignment doesn't have it)

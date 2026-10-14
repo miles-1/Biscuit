@@ -6,10 +6,12 @@ export typst_compile_assn
 export typst_query_assn
 export typst_compile_feedback_bundle
 export typst_compile_question_preview
+export typst_compile_answer_svgs
 
 assn_typst_file() = joinpath(package_root(), "typst_doc_generators", "assignment.typ")
 feedback_typst_file() = joinpath(package_root(), "typst_doc_generators", "feedback.typ")
 question_preview_typst_file() = joinpath(package_root(), "typst_doc_generators", "question_preview.typ")
+answers_typst_file() = joinpath(package_root(), "typst_doc_generators", "answers.typ")
 
 # Path relative to the Typst working directory (the master JSON's folder).
 function _rel_to(dir::String, path::String)::String
@@ -114,13 +116,13 @@ function _without_assignment_import(src::String)::String
     return replace(src, r"^#import \"assignment\.typ\"[^\n]*\r?\n" => ""; count=1)
 end
 
-function _question_preview_stdin_source()::String
-    # Concatenate so preview compiles from stdin. If we instead compile a copy of
-    # question_preview.typ inside the temp dir, `eval()` resolves `image("foo.svg")`
-    # relative to that copy — not the assignment folder.
+function _stdin_source_with_assignment(typst_file::String)::String
+    # Concatenate so the file compiles from stdin. If we instead compile a copy of it
+    # inside the temp dir, `eval()` resolves `image("foo.svg")` relative to that
+    # copy — not the assignment folder.
     assn = read(assn_typst_file(), String)
-    preview = _without_assignment_import(read(question_preview_typst_file(), String))
-    return assn * "\n" * preview
+    rest = _without_assignment_import(read(typst_file, String))
+    return assn * "\n" * rest
 end
 
 function typst_compile_question_preview(;
@@ -141,11 +143,45 @@ function typst_compile_question_preview(;
     ]
     cmd = pipeline(
         Cmd(`typst $args`; dir=work_abs);
-        stdin=IOBuffer(_question_preview_stdin_source()),
+        stdin=IOBuffer(_stdin_source_with_assignment(question_preview_typst_file())),
         stdout=stdout_io,
         stderr=stderr_io,
     )
     run(cmd)
+    return nothing
+end
+
+# One SVG page per (version, question) listed in `jobs_file`, written to `output_pattern` ("…-{p}.svg").
+function typst_compile_answer_svgs(;
+    work_dir::String,
+    master_file::String,
+    selection_file::String,
+    jobs_file::String,
+    output_pattern::String,
+)::Nothing
+    work_abs = abspath(work_dir)
+    args = [
+        "compile",
+        "--root", ".",
+        "--input", "answer_master=$(_rel_to(work_abs, master_file))",
+        "--input", "answer_selection=$(_rel_to(work_abs, selection_file))",
+        "--input", "answer_jobs=$(_rel_to(work_abs, jobs_file))",
+        "--format", "svg",
+        "-",
+        _rel_to(work_abs, output_pattern),
+    ]
+    stderr_buf = IOBuffer()
+    try
+        run(pipeline(
+            Cmd(`typst $args`; dir=work_abs);
+            stdin=IOBuffer(_stdin_source_with_assignment(answers_typst_file())),
+            stderr=stderr_buf,
+        ))
+    catch e
+        err = strip(String(take!(stderr_buf)))
+        isempty(err) && rethrow(e)
+        error(err)
+    end
     return nothing
 end
 

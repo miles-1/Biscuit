@@ -1,27 +1,21 @@
-#import "assignment.typ": eval_code, get_all, get_single_selected_question, multiple_choice, true_false, fill_blank, essay
+#import "assignment.typ": build_var_scope, random_values_box, get_all, get_single_selected_question, multiple_choice, true_false, fill_blank, essay
 
 #let preview = json(sys.inputs.at("preview"))
-#let global_vars_raw = preview.at("global_vars", default: none)
-#let global_vars = if type(global_vars_raw) == str and global_vars_raw.len() > 0 {
-  eval_code(global_vars_raw)
-} else {
-  none
-}
-#let margin_cm = preview.at("margin", default: 1.5)
-#let margin = calc.max(margin_cm, 1.5) * 1cm
+#let random_values = preview.at("vars", default: none)
+#let scope = build_var_scope(preview.at("global_vars", default: none), random_values)
 #let is_key = preview.at("is_key", default: true)
 #let m_q = preview.question
-#let s_q = preview.at("selection", default: (:))
 
-#set page(width: 8.5in, height: auto, margin: (x: margin, y: 12pt))
+#set page(width: 8.5in, height: auto, margin: (x: 1.5cm, y: 12pt))
 #set text(size: 11pt)
 
 #if is_key {
   align(center, text(14pt, red, strong[KEY]))
   v(6pt, weak: true)
+  random_values_box(preview.at("random_vars", default: none), random_values)
 }
 
-#let qs = get_single_selected_question(m_q, s_q, id: none, global_vars: global_vars, is_key: is_key)
+#let qs = get_single_selected_question(m_q, (:), id: none, scope: scope)
 #let q = qs.first()
 #assert("type" in q and "body" in q, message: "preview question must have `type` and `body`")
 #let unpacked = get_all(q, "type", "body", "points", "correct_answer", "options")

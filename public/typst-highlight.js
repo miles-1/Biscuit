@@ -15,11 +15,11 @@ function escapeHighlightText(text) {
 // the text and the gaps between them are handed to Prism. Splitting rather than post-processing
 // Prism's HTML matters because `(-2.5)` does not survive as one token: the grammar takes the `-` as
 // an escape and leaves the rest as prose.
-function renderTypstHighlightHtml(text, markDeductions) {
-    const grammar = window.Prism && Prism.languages && Prism.languages.typst;
+function renderTypstHighlightHtml(text, markDeductions, language = "typst") {
+    const grammar = window.Prism && Prism.languages && Prism.languages[language];
     const highlightGap = (chunk) => {
         if (!chunk) return "";
-        return grammar ? Prism.highlight(chunk, grammar, "typst") : escapeHighlightText(chunk);
+        return grammar ? Prism.highlight(chunk, grammar, language) : escapeHighlightText(chunk);
     };
     if (!markDeductions) return highlightGap(text);
     let html = "";
@@ -54,7 +54,9 @@ function wrapTypstMarkupField(el) {
         const text = el.value || "";
         // Only score-by-input feedback boxes opt in to deduction highlighting.
         const markDeductions = el.dataset.feedbackDeductions === "1";
-        code.innerHTML = renderTypstHighlightHtml(text, markDeductions)
+        // Fields holding Typst code (not markup) opt in with data-typst-mode="code".
+        const language = el.dataset.typstMode === "code" ? "typst-code" : "typst";
+        code.innerHTML = renderTypstHighlightHtml(text, markDeductions, language)
             + (el.tagName === "TEXTAREA" && text.endsWith("\n") ? "\n" : "");
         pre.scrollTop = el.scrollTop;
         pre.scrollLeft = el.scrollLeft;
@@ -74,6 +76,7 @@ function enhanceTypstMarkupFields(root) {
         "#builder-intro",
         ".builder-section-title-input",
         ".builder-option-input",
+        ".builder-blank-answer-input",
         "textarea.builder-textarea",
         "textarea.feedback-input",
     ].join(",")).forEach(wrapTypstMarkupField);

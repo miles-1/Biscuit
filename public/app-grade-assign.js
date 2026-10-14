@@ -59,6 +59,7 @@ async function startGrading() {
         ]);
         studentsList = studentsPayload.students || [];
         masterQuestions = flattenQuestions(masterPayload.master?.questions || []);
+        loadAnswerSvgs();
         showSection('grading-ui');
         gradeStep1.classList.remove('hidden');
         gradeStep2.classList.add('hidden');

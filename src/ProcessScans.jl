@@ -1284,8 +1284,6 @@ function _process_non_biscuit_pages(
         println("Created: selection.json - $num_students student version(s) and 1 key")
         write_json("page_elements.json", _non_biscuit_page_elements(num_students, per_student))
         println("Created: page_elements.json")
-        write_json("var_answers.json", Dict{String, Any}())
-        println("Created: var_answers.json")
         write_json("processed_assn_data.json", _non_biscuit_processed_assn_data(num_students))
         println("Created: processed_assn_data.json")
 

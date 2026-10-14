@@ -1,19 +1,21 @@
 // Assignment Creator (Master JSON Builder & Live Typst Preview)
 
+const DEFAULT_GLOBAL_VARS = '(\n  // global variables go here, e.g.,\n  // a: 1234\n)';
+const RANDOM_VAR_NAME_RE = /^[A-Za-z_][A-Za-z0-9_-]*$/;
+
 let builderState = {
     filePath: '',
     master: {
         assn_type: 'quiz',
         title: 'New Assignment',
         intro_content: '',
-        margin: 1.5,
-        section_numbering: '[1]',
         shuffle_questions: false,
         shuffle_answers: false,
         shuffle_sections: false,
         version_count: 1,
         seed: 1234,
-        global_vars: '',
+        random_vars: [],
+        global_vars: DEFAULT_GLOBAL_VARS,
         single_doc_export: false,
         will_print_double_sided: true,
         use_sections: false,
@@ -32,6 +34,7 @@ let builderState = {
     previewError: null,
     previewZoom: 1.0,
     previewKind: 'none',
+    previewIsKey: true,
     questionPreviewId: null,
     questionPreviewHash: null,
     questionPreviewError: null,
@@ -40,8 +43,6 @@ let builderState = {
 
 let builderToggles = {
     intro: false,
-    margin: false,
-    sectionNumbering: false,
     seed: false,
     globalVars: false,
 };
@@ -129,8 +130,6 @@ function openMasterBuilder(initialData, initialPath) {
 function resetBuilderState(path = '') {
     builderToggles = {
         intro: false,
-        margin: false,
-        sectionNumbering: false,
         seed: false,
         globalVars: false,
     };
@@ -140,14 +139,13 @@ function resetBuilderState(path = '') {
             assn_type: 'quiz',
             title: 'New Assignment',
             intro_content: '',
-            margin: 1.5,
-            section_numbering: '[1]',
             shuffle_questions: false,
             shuffle_answers: false,
             shuffle_sections: false,
             version_count: 1,
             seed: 1234,
-            global_vars: '',
+            random_vars: [],
+            global_vars: DEFAULT_GLOBAL_VARS,
             single_doc_export: false,
             will_print_double_sided: true,
             use_sections: false,
@@ -166,24 +164,26 @@ function resetBuilderState(path = '') {
         previewError: null,
         previewZoom: 1.0,
         previewKind: 'none',
+        previewIsKey: builderState.previewIsKey !== false,
         questionPreviewId: null,
         questionPreviewHash: null,
         questionPreviewError: null,
         questionPreviewUpdating: false,
     };
     builderLastQuestionPath = null;
+    markGlobalVarsPanelStale();
 }
 
 function loadMasterDataIntoState(data, path = '') {
     const questionsRaw = Array.isArray(data.questions) ? data.questions : [];
     const hasSections = questionsRaw.length > 0 && typeof questionsRaw[0] === 'object' && ('section_title' in questionsRaw[0]);
 
+    const randomVars = normalizeRandomVarsFromData(data.random_vars);
+    const globalVars = typeof data.global_vars === 'string' && data.global_vars.trim() ? data.global_vars : DEFAULT_GLOBAL_VARS;
     builderToggles = {
         intro: !!(data.intro_content && data.intro_content.trim()),
-        margin: data.margin !== undefined && data.margin !== null && data.margin !== 1.5,
-        sectionNumbering: data.section_numbering !== undefined && data.section_numbering !== null && String(data.section_numbering).trim() !== '[1]',
         seed: data.seed !== undefined && data.seed !== null && data.seed !== 1234,
-        globalVars: !!(data.global_vars && data.global_vars.trim()),
+        globalVars: randomVars.length > 0 || globalVars.trim() !== DEFAULT_GLOBAL_VARS,
     };
 
     builderState.filePath = path;
@@ -198,25 +198,26 @@ function loadMasterDataIntoState(data, path = '') {
     builderState.questionPreviewUpdating = false;
     builderState.activeAddMenuKey = null;
     builderLastQuestionPath = null;
+    markGlobalVarsPanelStale();
 
     builderState.master = {
         assn_type: data.assn_type || 'quiz',
         title: data.title || 'Untitled Assignment',
         intro_content: data.intro_content || '',
-        margin: typeof data.margin === 'number' ? data.margin : 1.5,
-        section_numbering: data.section_numbering !== undefined && data.section_numbering !== null ? String(data.section_numbering) : '[1]',
         shuffle_questions: !!data.shuffle_questions,
         shuffle_answers: !!data.shuffle_answers,
         shuffle_sections: !!data.shuffle_sections,
         version_count: typeof data.version_count === 'number' ? data.version_count : 1,
         seed: typeof data.seed === 'number' ? data.seed : 1234,
-        global_vars: data.global_vars || '',
+        random_vars: randomVars,
+        global_vars: globalVars,
         single_doc_export: !!data.single_doc_export,
         will_print_double_sided: data.will_print_double_sided !== undefined ? !!data.will_print_double_sided : true,
         use_sections: hasSections,
         sections: hasSections ? questionsRaw.map((sec) => applyShuffleOverrides({
             section_title: String(sec.section_title || ''),
             intro_content: sec.intro_content || '',
+            showIntro: !!(sec.intro_content && String(sec.intro_content).trim()),
             questions: normalizeQuestionsFromData(sec.questions || []),
         }, sec)) : [createDefaultSection('Section 1')],
         questions: !hasSections ? normalizeQuestionsFromData(questionsRaw) : [],
@@ -232,12 +233,6 @@ function buildMasterJsonPayload() {
     if (m.intro_content && m.intro_content.trim()) {
         result.intro_content = m.intro_content.trim();
     }
-    if (typeof m.margin === 'number' && m.margin >= 1.5 && m.margin <= 3.0) {
-        result.margin = m.margin;
-    }
-    if (m.section_numbering !== undefined && m.section_numbering !== null && m.section_numbering.trim()) {
-        result.section_numbering = m.section_numbering.trim();
-    }
     if (m.shuffle_questions) result.shuffle_questions = true;
     if (m.shuffle_answers) result.shuffle_answers = true;
     if (m.use_sections && m.shuffle_sections) result.shuffle_sections = true;
@@ -247,11 +242,10 @@ function buildMasterJsonPayload() {
     if (typeof m.seed === 'number' && m.seed > 0) {
         result.seed = m.seed;
     }
-    if (m.global_vars && m.global_vars.trim()) {
-        result.global_vars = m.global_vars.trim();
-    } else {
-        result.global_vars = null;
-    }
+    const randomVars = serializeRandomVars(m.random_vars);
+    if (randomVars.length > 0) result.random_vars = randomVars;
+    const globalVars = (m.global_vars || '').trim();
+    if (globalVars && globalVars !== DEFAULT_GLOBAL_VARS) result.global_vars = globalVars;
     result.single_doc_export = !!m.single_doc_export;
     result.will_print_double_sided = m.will_print_double_sided !== undefined ? !!m.will_print_double_sided : true;
 
@@ -418,6 +412,58 @@ function normalizeQuestionsFromData(list) {
     });
 }
 
+function createDefaultRandomVar(type) {
+    return type === 'float'
+        ? { name: '', type: 'float', min: 0, max: 1, digits: 2 }
+        : { name: '', type: 'int', min: 1, max: 10, digits: 2 };
+}
+
+function normalizeRandomVarsFromData(list) {
+    if (!Array.isArray(list)) return [];
+    return list.filter((v) => v && typeof v === 'object').map((v) => ({
+        name: String(v.name || ''),
+        type: v.type === 'float' ? 'float' : 'int',
+        min: v.min,
+        max: v.max,
+        digits: Number.isInteger(v.digits) ? v.digits : 2,
+    }));
+}
+
+function numberOrNull(v) {
+    if (v === '' || v === null || v === undefined || isNaN(Number(v))) return null;
+    return Number(v);
+}
+
+// Rows without a name are still being filled in, so they are left out until named.
+function serializeRandomVars(list) {
+    if (!Array.isArray(list)) return [];
+    return list.filter((v) => v && String(v.name || '').trim()).map((v) => {
+        const out = {
+            name: String(v.name).trim(),
+            type: v.type === 'float' ? 'float' : 'int',
+            min: numberOrNull(v.min),
+            max: numberOrNull(v.max),
+        };
+        if (out.type === 'float') {
+            const digits = Number(v.digits);
+            out.digits = Number.isInteger(digits) && digits >= 0 ? digits : 2;
+        }
+        return out;
+    });
+}
+
+function countBlanks(body) {
+    return (String(body || '').match(/#BLANK/g) || []).length;
+}
+
+function fillBlankAnswerList(q) {
+    const n = Math.max(1, countBlanks(q.body));
+    const raw = Array.isArray(q.correct_answer)
+        ? q.correct_answer
+        : (typeof q.correct_answer === 'string' ? [q.correct_answer] : []);
+    return Array.from({ length: n }, (_, i) => (raw[i] === undefined || raw[i] === null ? '' : String(raw[i])));
+}
+
 function sanitizeSingleQuestion(q) {
     if (!q || typeof q !== 'object') return createDefaultQuestion('multiple_choice');
     const type = q.type || 'multiple_choice';
@@ -428,13 +474,6 @@ function sanitizeSingleQuestion(q) {
     if (q.points !== undefined && q.points !== null && q.points !== '' && !isNaN(Number(q.points))) {
         clean.points = Number(q.points);
     }
-    if (q.vars && typeof q.vars === 'object' && Object.keys(q.vars).length > 0) {
-        clean.vars = q.vars;
-    }
-    if (q.secondary_vars && typeof q.secondary_vars === 'object' && Object.keys(q.secondary_vars).length > 0) {
-        clean.secondary_vars = q.secondary_vars;
-    }
-
     if (type === 'multiple_choice') {
         clean.options = Array.isArray(q.options) && q.options.length > 0 ? q.options.map(String) : ['Option A', 'Option B'];
         if (q.correct_answer !== undefined && q.correct_answer !== null && q.correct_answer !== '' && !isNaN(Number(q.correct_answer))) {
@@ -450,12 +489,11 @@ function sanitizeSingleQuestion(q) {
             clean.correct_answer = null;
         }
     } else if (type === 'fill_blank') {
-        if (Array.isArray(q.correct_answer)) {
-            clean.correct_answer = q.correct_answer.map(String);
-        } else if (typeof q.correct_answer === 'string' && q.correct_answer.trim()) {
-            clean.correct_answer = q.correct_answer.trim();
-        } else {
+        const answers = fillBlankAnswerList(q).map((a) => a.trim());
+        if (answers.every((a) => !a)) {
             clean.correct_answer = null;
+        } else {
+            clean.correct_answer = answers.length === 1 ? answers[0] : answers;
         }
         const cleanRubric = serializeRubricList(q.rubric);
         if (cleanRubric) {
@@ -488,6 +526,8 @@ function renderBuilderUI() {
     attachBuilderEventListeners();
     ensureBuilderPreviewListeners();
     if (typeof enhanceTypstMarkupFields === "function") enhanceTypstMarkupFields(container);
+    syncGlobalVarsPanel();
+    updatePreviewModeButtons();
 }
 
 function renderTopLevelSettingsHtml() {
@@ -507,9 +547,9 @@ function renderTopLevelSettingsHtml() {
                         <option value="exam" ${m.assn_type === 'exam' ? 'selected' : ''}>Exam</option>
                     </select>
                 </div>
-                <div class="builder-control-group" style="flex: 1; min-width: 220px;">
+                <div class="builder-control-group builder-title-group">
                     <label for="builder-title">Assignment Title</label>
-                    <input type="text" id="builder-title" class="builder-input-title" value="${escapeHtml(m.title)}" placeholder="e.g. Midterm 1">
+                    <input type="text" id="builder-title" class="builder-input-full" value="${escapeHtml(m.title)}" placeholder="e.g. Midterm 1">
                 </div>
                 <div class="builder-control-group">
                     <label for="builder-version-count">Versions</label>
@@ -518,18 +558,22 @@ function renderTopLevelSettingsHtml() {
             </div>
 
             <div class="builder-checkbox-row">
+                <span class="builder-checkbox-row-label">Shuffle</span>
+                <label class="builder-checkbox-label">
+                    <input type="checkbox" id="builder-shuffle-s" ${m.shuffle_sections ? 'checked' : ''} ${m.use_sections ? '' : 'disabled'}>
+                    <span>Sections</span>
+                </label>
                 <label class="builder-checkbox-label">
                     <input type="checkbox" id="builder-shuffle-q" ${m.shuffle_questions ? 'checked' : ''}>
-                    <span>Shuffle Questions</span>
+                    <span>Questions</span>
                 </label>
                 <label class="builder-checkbox-label">
                     <input type="checkbox" id="builder-shuffle-a" ${m.shuffle_answers ? 'checked' : ''}>
-                    <span>Shuffle Answers</span>
+                    <span>Answers</span>
                 </label>
-                <label class="builder-checkbox-label">
-                    <input type="checkbox" id="builder-shuffle-s" ${m.shuffle_sections ? 'checked' : ''} ${m.use_sections ? '' : 'disabled'}>
-                    <span>Shuffle Sections</span>
-                </label>
+            </div>
+
+            <div class="builder-checkbox-row">
                 <label class="builder-checkbox-label">
                     <input type="checkbox" id="builder-single-doc" ${m.single_doc_export ? 'checked' : ''}>
                     <span>Single Doc Export</span>
@@ -543,12 +587,6 @@ function renderTopLevelSettingsHtml() {
             <div class="builder-optional-toggles-row">
                 <button type="button" class="builder-toggle-link ${builderToggles.intro ? 'active' : ''}" onclick="toggleTopSetting('intro')">
                     ${builderToggles.intro ? '−' : '+'} Intro Content
-                </button>
-                <button type="button" class="builder-toggle-link ${builderToggles.margin ? 'active' : ''}" onclick="toggleTopSetting('margin')">
-                    ${builderToggles.margin ? '−' : '+'} Margin
-                </button>
-                <button type="button" class="builder-toggle-link ${builderToggles.sectionNumbering ? 'active' : ''}" onclick="toggleTopSetting('sectionNumbering')">
-                    ${builderToggles.sectionNumbering ? '−' : '+'} Section Numbering
                 </button>
                 <button type="button" class="builder-toggle-link ${builderToggles.seed ? 'active' : ''}" onclick="toggleTopSetting('seed')">
                     ${builderToggles.seed ? '−' : '+'} Random Seed
@@ -565,37 +603,143 @@ function renderTopLevelSettingsHtml() {
                 </div>
             ` : ''}
 
-            ${(builderToggles.margin || builderToggles.sectionNumbering || builderToggles.seed) ? `
+            ${builderToggles.seed ? `
                 <div class="builder-form-row" style="margin-top: 8px;">
-                    ${builderToggles.margin ? `
-                        <div class="builder-control-group">
-                            <label for="builder-margin">Margin (cm)</label>
-                            <input type="number" id="builder-margin" class="builder-input-sm" min="1.5" max="3.0" step="0.1" value="${m.margin !== undefined ? m.margin : 1.5}">
-                        </div>
-                    ` : ''}
-                    ${builderToggles.sectionNumbering ? `
-                        <div class="builder-control-group">
-                            <label for="builder-sec-num">Section Numbering</label>
-                            <input type="text" id="builder-sec-num" class="builder-input-md" value="${escapeHtml(m.section_numbering || '')}" placeholder="[1], 1., (A)">
-                        </div>
-                    ` : ''}
-                    ${builderToggles.seed ? `
-                        <div class="builder-control-group">
-                            <label for="builder-seed">Random Seed</label>
-                            <input type="number" id="builder-seed" class="builder-input-md" min="1" step="1" value="${m.seed || 1234}">
-                        </div>
-                    ` : ''}
-                </div>
-            ` : ''}
-
-            ${builderToggles.globalVars ? `
-                <div class="builder-field-block" style="margin-top: 8px;">
-                    <label for="builder-global-vars">Global Vars <em>(Typst dictionary code)</em></label>
-                    <textarea id="builder-global-vars" class="builder-textarea-code" rows="2" placeholder='e.g. (class_name: "BIO 101", term: "Fall 2026")'>${escapeHtml(m.global_vars || '')}</textarea>
+                    <div class="builder-control-group">
+                        <label for="builder-seed">Random Seed</label>
+                        <input type="number" id="builder-seed" class="builder-input-md" min="1" step="1" value="${m.seed || 1234}">
+                    </div>
                 </div>
             ` : ''}
         </div>
     `;
+}
+
+// --- Global Vars panel (bottom half of the preview pane) ---
+
+let globalVarsPanelRendered = false;
+
+function markGlobalVarsPanelStale() {
+    globalVarsPanelRendered = false;
+}
+
+function syncGlobalVarsPanel() {
+    const panel = document.getElementById('builder-global-vars-panel');
+    if (!panel) return;
+    panel.classList.toggle('hidden', !builderToggles.globalVars);
+    if (builderToggles.globalVars && !globalVarsPanelRendered) renderGlobalVarsPanel();
+}
+
+function renderRandomVarRowHtml(v, i) {
+    const nameOk = !v.name || RANDOM_VAR_NAME_RE.test(v.name.trim());
+    const step = v.type === 'int' ? '1' : 'any';
+    return `
+        <input type="text" class="builder-input ${nameOk ? '' : 'is-invalid'}" value="${escapeHtml(v.name)}" placeholder="name" title="${nameOk ? '' : 'Use letters, digits, _ or -, starting with a letter or _'}" oninput="updateRandomVar(${i}, 'name', this.value, this)">
+        <select class="builder-input" onchange="updateRandomVar(${i}, 'type', this.value)">
+            <option value="int" ${v.type === 'int' ? 'selected' : ''}>int</option>
+            <option value="float" ${v.type === 'float' ? 'selected' : ''}>float</option>
+        </select>
+        <input type="number" class="builder-input" step="${step}" value="${v.min ?? ''}" oninput="updateRandomVar(${i}, 'min', this.value)">
+        <input type="number" class="builder-input" step="${step}" value="${v.max ?? ''}" oninput="updateRandomVar(${i}, 'max', this.value)">
+        ${v.type === 'float'
+            ? `<input type="number" class="builder-input" min="0" step="1" value="${v.digits ?? 2}" oninput="updateRandomVar(${i}, 'digits', this.value)">`
+            : '<span class="builder-rv-na">—</span>'}
+        <button type="button" class="btn-icon btn-danger" title="Delete random var" onclick="removeRandomVar(${i})"><span>🗑</span></button>
+    `;
+}
+
+function renderGlobalVarsPanel() {
+    const panel = document.getElementById('builder-global-vars-panel');
+    if (!panel) return;
+    const m = builderState.master;
+    const randomVars = Array.isArray(m.random_vars) ? m.random_vars : [];
+    panel.innerHTML = `
+        <div class="builder-gv-header">
+            <h3>Global Vars</h3>
+            <button type="button" class="btn-icon" title="Close" onclick="toggleTopSetting('globalVars')"><span>✕</span></button>
+        </div>
+        <div class="builder-gv-subhead">Random Vars <em>(new values for each version)</em></div>
+        ${randomVars.length === 0 ? `
+            <div class="builder-rv-empty">No random vars yet.</div>
+        ` : `
+            <div class="builder-rv-table">
+                <span class="builder-rv-head">Name</span>
+                <span class="builder-rv-head">Type</span>
+                <span class="builder-rv-head">Min</span>
+                <span class="builder-rv-head">Max</span>
+                <span class="builder-rv-head">Decimals</span>
+                <span></span>
+                ${randomVars.map(renderRandomVarRowHtml).join('')}
+            </div>
+        `}
+        <div class="builder-rv-add-row">
+            <select id="builder-rv-new-type" class="builder-input-select" style="width: 90px !important;">
+                <option value="int">int</option>
+                <option value="float">float</option>
+            </select>
+            <button type="button" class="btn-sm" onclick="addRandomVar(document.getElementById('builder-rv-new-type').value)">+ Add Random Var</button>
+        </div>
+        <div class="builder-gv-subhead">General Vars <em>(Typst code that can use the random vars and must end in a dictionary)</em></div>
+        <textarea id="builder-global-vars" class="builder-textarea" rows="8" spellcheck="false" data-typst-mode="code" oninput="updateGeneralVars(this.value)">${escapeHtml(m.global_vars || '')}</textarea>
+    `;
+    globalVarsPanelRendered = true;
+    if (typeof enhanceTypstMarkupFields === 'function') enhanceTypstMarkupFields(panel);
+}
+
+function addRandomVar(type) {
+    if (!Array.isArray(builderState.master.random_vars)) builderState.master.random_vars = [];
+    builderState.master.random_vars.push(createDefaultRandomVar(type));
+    renderGlobalVarsPanel();
+    const rows = document.querySelectorAll('#builder-global-vars-panel .builder-rv-table input[type="text"]');
+    if (rows.length) rows[rows.length - 1].focus();
+}
+
+function removeRandomVar(i) {
+    const list = builderState.master.random_vars;
+    if (!Array.isArray(list) || !list[i]) return;
+    list.splice(i, 1);
+    renderGlobalVarsPanel();
+    scheduleQuestionPreview();
+}
+
+function updateRandomVar(i, field, value, inputEl) {
+    const v = builderState.master.random_vars && builderState.master.random_vars[i];
+    if (!v) return;
+    if (field === 'name' || field === 'type') {
+        v[field] = value;
+    } else {
+        v[field] = value === '' ? '' : Number(value);
+    }
+    if (field === 'name' && inputEl) {
+        const ok = !value.trim() || RANDOM_VAR_NAME_RE.test(value.trim());
+        inputEl.classList.toggle('is-invalid', !ok);
+        inputEl.title = ok ? '' : 'Use letters, digits, _ or -, starting with a letter or _';
+    }
+    if (field === 'type') renderGlobalVarsPanel();
+    scheduleQuestionPreview();
+}
+
+function updateGeneralVars(value) {
+    builderState.master.global_vars = value;
+    scheduleQuestionPreview();
+}
+
+function setBuilderPreviewIsKey(isKey) {
+    if (builderState.previewIsKey === isKey) return;
+    builderState.previewIsKey = isKey;
+    updatePreviewModeButtons();
+    if (builderState.previewKind === 'full') {
+        triggerPreview();
+    } else if (builderLastQuestionPath) {
+        requestQuestionPreview();
+    }
+}
+
+function updatePreviewModeButtons() {
+    const keyBtn = document.getElementById('builder-preview-mode-key');
+    const exampleBtn = document.getElementById('builder-preview-mode-example');
+    if (keyBtn) keyBtn.classList.toggle('active', builderState.previewIsKey);
+    if (exampleBtn) exampleBtn.classList.toggle('active', !builderState.previewIsKey);
 }
 
 function renderSectionsAndQuestionsHtml() {
@@ -650,7 +794,14 @@ function renderSectionCardHtml(sec, sIdx) {
                         <button type="button" class="btn-icon btn-danger" title="Delete Section" onclick="deleteSection(${sIdx})"><span>🗑</span></button>
                     </div>
                 </div>
-                <textarea class="builder-textarea" rows="2" placeholder="Intro content under this section title (optional Typst markup)" oninput="updateSectionIntro(${sIdx}, this.value)">${escapeHtml(sec.intro_content || '')}</textarea>
+                <div>
+                    <button type="button" class="builder-toggle-link ${sec.showIntro ? 'active' : ''}" onclick="toggleSectionIntro(${sIdx})">
+                        ${sec.showIntro ? '−' : '+'} Intro Content
+                    </button>
+                </div>
+                ${sec.showIntro ? `
+                    <textarea class="builder-textarea" rows="2" placeholder="Intro content under this section title (optional Typst markup)" oninput="updateSectionIntro(${sIdx}, this.value)">${escapeHtml(sec.intro_content || '')}</textarea>
+                ` : ''}
             </div>
             <div class="builder-shuffle-row">
                 ${renderShuffleOverrideSelect(sec, 'shuffle_questions', `updateSectionShuffle(${sIdx}, 'shuffle_questions', this.value)`, 'Shuffle questions')}
@@ -791,26 +942,40 @@ function renderQuestionCardHtml(q, qIdx, isInsideBank, sIdx, bIdx) {
 
             <div class="builder-field-block" style="margin-top: 10px;">
                 <label>Question Body <em>(Typst markup)</em></label>
-                <textarea class="builder-textarea" rows="2" placeholder="${q.type === 'fill_blank' ? 'e.g. Mitochondria is the #BLANK of the cell.' : 'Enter question text...'}" oninput="updateQuestionField(${sIdx}, ${bIdx}, ${qIdx}, 'body', this.value)">${escapeHtml(q.body || '')}</textarea>
+                <textarea class="builder-textarea" rows="2" placeholder="${q.type === 'fill_blank' ? 'e.g. Mitochondria is the #BLANK of the cell.' : 'Enter question text...'}" oninput="updateQuestionBody(${sIdx}, ${bIdx}, ${qIdx}, this.value)">${escapeHtml(q.body || '')}</textarea>
             </div>
 
             ${renderQuestionTypeSpecificHtml(q, qIdx, isInsideBank, sIdx, bIdx)}
-
-            <details class="builder-advanced-details" style="margin-top: 10px;">
-                <summary>Variables &amp; Formulas (Optional)</summary>
-                <div class="builder-vars-section" style="margin-top: 8px;">
-                    <div class="builder-field-block">
-                        <label><code>vars</code> (Random Variables, JSON)</label>
-                        <textarea class="builder-textarea-code" rows="2" placeholder='e.g. {"x": [1, 2, 3], "y": {"type": "int", "min": 1, "max": 10}}' onchange="updateQuestionJsonField(${sIdx}, ${bIdx}, ${qIdx}, 'vars', this.value)">${q.vars ? escapeHtml(JSON.stringify(q.vars)) : ''}</textarea>
-                    </div>
-                    <div class="builder-field-block" style="margin-top: 8px;">
-                        <label><code>secondary_vars</code> (Computed Typst expressions)</label>
-                        <textarea class="builder-textarea-code" rows="2" placeholder='e.g. {"ans": "x + y"}' onchange="updateQuestionJsonField(${sIdx}, ${bIdx}, ${qIdx}, 'secondary_vars', this.value)">${q.secondary_vars ? escapeHtml(JSON.stringify(q.secondary_vars)) : ''}</textarea>
-                    </div>
-                </div>
-            </details>
         </div>
     `;
+}
+
+function fillBlankAnswersId(sIdx, bIdx, qIdx) {
+    return `builder-fill-answers-${sIdx ?? 'r'}-${bIdx ?? 'r'}-${qIdx}`;
+}
+
+function renderFillBlankAnswerFieldsHtml(q, sIdx, bIdx, qIdx) {
+    const answers = fillBlankAnswerList(q);
+    return answers.map((a, i) => `
+        <div class="builder-field-block">
+            <label>Correct Answer${answers.length > 1 ? ` — Blank ${i + 1}` : ''} <em>(Typst markup)</em></label>
+            <input type="text" class="builder-input builder-blank-answer-input" value="${escapeHtml(a)}" placeholder="e.g. Paris, or #b" oninput="updateFillBlankAnswer(${sIdx}, ${bIdx}, ${qIdx}, ${i}, this.value)">
+        </div>
+    `).join('');
+}
+
+// Re-renders only the answer fields, so typing in the body keeps its focus when the #BLANK count changes.
+function updateQuestionBody(sIdx, bIdx, qIdx, value) {
+    const q = getQuestionRef(sIdx, bIdx, qIdx);
+    if (!q) return;
+    const blanksBefore = countBlanks(q.body);
+    q.body = value;
+    if (q.type !== 'fill_blank' || countBlanks(value) === blanksBefore) return;
+    q.correct_answer = fillBlankAnswerList(q);
+    const container = document.getElementById(fillBlankAnswersId(sIdx, bIdx, qIdx));
+    if (!container) return;
+    container.innerHTML = renderFillBlankAnswerFieldsHtml(q, sIdx, bIdx, qIdx);
+    if (typeof enhanceTypstMarkupFields === 'function') enhanceTypstMarkupFields(container);
 }
 
 function renderQuestionTypeSpecificHtml(q, qIdx, isInsideBank, sIdx, bIdx) {
@@ -868,12 +1033,10 @@ function renderQuestionTypeSpecificHtml(q, qIdx, isInsideBank, sIdx, bIdx) {
     }
 
     if (q.type === 'fill_blank') {
-        const correctStr = Array.isArray(q.correct_answer) ? q.correct_answer.join(', ') : (q.correct_answer || '');
         return `
             <div class="builder-options-block">
-                <div class="builder-field-block">
-                    <label>Correct Answer(s) <em>(comma-separated if multiple #BLANKs)</em></label>
-                    <input type="text" class="builder-input-title" value="${escapeHtml(correctStr)}" placeholder="e.g. Paris or [Paris, France]" oninput="updateFillBlankAnswer(${sIdx}, ${bIdx}, ${qIdx}, this.value)">
+                <div id="${fillBlankAnswersId(sIdx, bIdx, qIdx)}">
+                    ${renderFillBlankAnswerFieldsHtml(q, sIdx, bIdx, qIdx)}
                 </div>
                 ${renderRubricBuilderHtml(q, sIdx, bIdx, qIdx)}
             </div>
@@ -888,10 +1051,10 @@ function renderQuestionTypeSpecificHtml(q, qIdx, isInsideBank, sIdx, bIdx) {
                         <label>Blank Lines</label>
                         <input type="number" min="0" max="50" class="builder-input-xs" value="${q.num_lines !== undefined ? q.num_lines : 3}" oninput="updateQuestionField(${sIdx}, ${bIdx}, ${qIdx}, 'num_lines', parseInt(this.value, 10) || 0)">
                     </div>
-                    <div class="builder-control-group" style="flex: 1; min-width: 220px;">
-                        <label>Sample Solution / Key <em>(optional Typst markup)</em></label>
-                        <input type="text" class="builder-input-title" value="${escapeHtml(q.correct_answer || '')}" placeholder="Answer to show on the Key" oninput="updateQuestionField(${sIdx}, ${bIdx}, ${qIdx}, 'correct_answer', this.value)">
-                    </div>
+                </div>
+                <div class="builder-field-block">
+                    <label>Correct Answer <em>(optional Typst markup, shown on the key and when grading)</em></label>
+                    <textarea class="builder-textarea" rows="2" placeholder="e.g. The frequency is #calc.round(b / (b + c), digits: 2)." oninput="updateQuestionField(${sIdx}, ${bIdx}, ${qIdx}, 'correct_answer', this.value)">${escapeHtml(q.correct_answer || '')}</textarea>
                 </div>
                 ${renderRubricBuilderHtml(q, sIdx, bIdx, qIdx)}
             </div>
@@ -1018,12 +1181,6 @@ function attachBuilderEventListeners() {
     const intro = document.getElementById('builder-intro');
     if (intro) intro.oninput = () => { builderState.master.intro_content = intro.value; };
 
-    const margin = document.getElementById('builder-margin');
-    if (margin) margin.oninput = () => { builderState.master.margin = parseFloat(margin.value) || 1.5; };
-
-    const secNum = document.getElementById('builder-sec-num');
-    if (secNum) secNum.oninput = () => { builderState.master.section_numbering = secNum.value; };
-
     const vCount = document.getElementById('builder-version-count');
     if (vCount) vCount.oninput = () => { builderState.master.version_count = parseInt(vCount.value, 10) || 1; };
 
@@ -1044,9 +1201,6 @@ function attachBuilderEventListeners() {
 
     const doubleSided = document.getElementById('builder-double-sided');
     if (doubleSided) doubleSided.onchange = () => { builderState.master.will_print_double_sided = doubleSided.checked; };
-
-    const gVars = document.getElementById('builder-global-vars');
-    if (gVars) gVars.oninput = () => { builderState.master.global_vars = gVars.value; };
 }
 
 function openAddQuestionMenu(key) {
@@ -1095,20 +1249,6 @@ function updateQuestionField(sIdx, bIdx, qIdx, field, val) {
     }
 }
 
-function updateQuestionJsonField(sIdx, bIdx, qIdx, field, rawStr) {
-    const q = getQuestionRef(sIdx, bIdx, qIdx);
-    if (!q) return;
-    if (!rawStr || !rawStr.trim()) {
-        delete q[field];
-        return;
-    }
-    try {
-        q[field] = JSON.parse(rawStr);
-    } catch (e) {
-        // Keep string if not valid JSON
-    }
-}
-
 function updateOptionText(sIdx, bIdx, qIdx, oIdx, text) {
     const q = getQuestionRef(sIdx, bIdx, qIdx);
     if (q && Array.isArray(q.options)) {
@@ -1154,11 +1294,12 @@ function toggleTrueFalseAnswer(sIdx, bIdx, qIdx, oIdx, isChecked) {
     }
 }
 
-function updateFillBlankAnswer(sIdx, bIdx, qIdx, rawValue) {
+function updateFillBlankAnswer(sIdx, bIdx, qIdx, blankIdx, value) {
     const q = getQuestionRef(sIdx, bIdx, qIdx);
     if (!q) return;
-    const parts = rawValue.split(',').map((s) => s.trim()).filter((s) => s.length > 0);
-    q.correct_answer = parts.length > 1 ? parts : (parts.length === 1 ? parts[0] : '');
+    const answers = fillBlankAnswerList(q);
+    answers[blankIdx] = value;
+    q.correct_answer = answers;
 }
 
 function duplicateQuestion(sIdx, bIdx, qIdx) {
@@ -1324,6 +1465,13 @@ function updateSectionTitle(sIdx, title) {
     }
 }
 
+function toggleSectionIntro(sIdx) {
+    const sec = builderState.master.sections && builderState.master.sections[sIdx];
+    if (!sec) return;
+    sec.showIntro = !sec.showIntro;
+    renderBuilderUI();
+}
+
 function updateSectionIntro(sIdx, intro) {
     if (builderState.master.sections && builderState.master.sections[sIdx]) {
         builderState.master.sections[sIdx].intro_content = intro;
@@ -1403,8 +1551,7 @@ function shouldRefreshQuestionPreview(e) {
     if (!e || !e.target) return false;
     if (e.target.classList && e.target.classList.contains('builder-shuffle-select')) return false;
     if (e.target.closest && e.target.closest('[data-q-preview]')) return true;
-    const id = e.target.id;
-    return id === 'builder-global-vars' || id === 'builder-margin' || id === 'builder-seed';
+    return e.target.id === 'builder-seed';
 }
 
 function ensureBuilderPreviewListeners() {
@@ -1457,9 +1604,9 @@ async function requestQuestionPreview() {
             body: JSON.stringify({
                 question: sanitizeSingleQuestion(q),
                 global_vars: m.global_vars || '',
-                margin: typeof m.margin === 'number' ? m.margin : 1.5,
+                random_vars: serializeRandomVars(m.random_vars),
                 seed: typeof m.seed === 'number' && m.seed > 0 ? m.seed : 1234,
-                is_key: true,
+                is_key: builderState.previewIsKey,
                 source_path: builderState.filePath || '',
             }),
         });
@@ -1484,6 +1631,10 @@ async function requestQuestionPreview() {
     }
 }
 
+function previewModeLabel() {
+    return builderState.previewIsKey ? 'Key' : 'Example (version 0)';
+}
+
 function questionPreviewSrc() {
     if (!builderState.questionPreviewId || !builderState.questionPreviewHash) return '';
     return `/api/preview_question/${builderState.questionPreviewId}?h=${encodeURIComponent(builderState.questionPreviewHash)}`;
@@ -1494,7 +1645,7 @@ function renderQuestionPreviewInto(container, header) {
     const updating = builderState.questionPreviewUpdating;
     const qErr = builderState.questionPreviewError;
     if (header) {
-        header.textContent = updating ? 'Question preview · updating…' : 'Question preview · Key';
+        header.textContent = updating ? 'Question preview · updating…' : `Question preview · ${previewModeLabel()}`;
     }
 
     let card = container.querySelector('.builder-preview-question-card');
@@ -1565,6 +1716,7 @@ async function triggerPreview() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 master: masterPayload,
+                is_key: builderState.previewIsKey,
                 source_path: builderState.filePath || '',
             }),
         });
@@ -1618,7 +1770,7 @@ function renderPreviewPane() {
 
     if (showFull && builderState.previewId && builderState.previewPages && builderState.previewPages.length > 0) {
         if (header) {
-            header.textContent = `${builderState.previewPages.length} page${builderState.previewPages.length !== 1 ? 's' : ''}`;
+            header.textContent = `${builderState.previewPages.length} page${builderState.previewPages.length !== 1 ? 's' : ''} · ${previewModeLabel()}`;
         }
         const zoom = builderState.previewZoom || 1.0;
         container.innerHTML = `

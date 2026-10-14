@@ -15,7 +15,6 @@ const JSON_FILES = (
     "master.json",
     "selection.json",
     "page_elements.json",
-    "var_answers.json",
     "processed_assn_data.json",
 )
 
