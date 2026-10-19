@@ -7,6 +7,7 @@ export typst_query_assn
 export typst_compile_feedback_bundle
 export typst_compile_question_preview
 export typst_compile_answer_svgs
+export typst_check_markup
 
 assn_typst_file() = joinpath(package_root(), "typst_doc_generators", "assignment.typ")
 feedback_typst_file() = joinpath(package_root(), "typst_doc_generators", "feedback.typ")
@@ -183,6 +184,46 @@ function typst_compile_answer_svgs(;
         error(err)
     end
     return nothing
+end
+
+const _CHECK_ERROR_RE = r"(?m)^(?:.*[\\/])?t(\d+)\.typ:(\d+):(\d+): error: ([^\r\n]*)"
+
+# Evaluate each text as Typst markup, like `eval(text, mode: "markup")` in feedback.typ. Returns,
+# per text, `nothing` or a Dict with "message", "line", "column" (1-based, inside that text).
+# Each text is its own included file so the error names it; Typst stops at the first error, so the
+# failing text is dropped and the rest re-run.
+function typst_check_markup(texts::AbstractVector{<:AbstractString})
+    results = Vector{Union{Nothing,Dict{String,Any}}}(nothing, length(texts))
+    isempty(texts) && return results
+    mktempdir() do dir
+        for (i, text) in enumerate(texts)
+            write(joinpath(dir, "t$i.typ"), text)
+        end
+        pending = collect(eachindex(texts))
+        while !isempty(pending)
+            write(joinpath(dir, "main.typ"), join(("#include \"t$i.typ\"\n" for i in pending)))
+            stderr_buf = IOBuffer()
+            cmd = Cmd(`typst eval --diagnostic-format short --root . --in main.typ none`; dir=abspath(dir))
+            success(pipeline(cmd; stdout=devnull, stderr=stderr_buf)) && break
+            err = String(take!(stderr_buf))
+            m = match(_CHECK_ERROR_RE, err)
+            if isnothing(m) || parse(Int, m[1]) ∉ pending
+                msg = strip(err)
+                for i in pending
+                    results[i] = Dict{String,Any}("message" => isempty(msg) ? "Typst check failed" : msg)
+                end
+                break
+            end
+            i = parse(Int, m[1])
+            results[i] = Dict{String,Any}(
+                "message" => strip(m[4]),
+                "line" => parse(Int, m[2]),
+                "column" => parse(Int, m[3]) + 1,  # Typst columns are 0-based
+            )
+            filter!(!=(i), pending)
+        end
+    end
+    return results
 end
 
 end # module

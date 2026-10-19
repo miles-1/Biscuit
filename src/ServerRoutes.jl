@@ -628,6 +628,53 @@ end
     end
 end
 
+# Live check of one feedback box (or template) as Typst markup.
+@post "/api/check_typst_markup" function(req::HTTP.Request)
+    data = Oxygen.json(req)
+    text = string(get(data, "text", ""))
+    try
+        err = isempty(strip(text)) ? nothing : only(typst_check_markup([text]))
+        return Dict("status" => "success", "error" => err)
+    catch e
+        return Dict("status" => "error", "message" => sprint(showerror, e))
+    end
+end
+
+# Every saved feedback that would fail to evaluate in feedback.typ, so export can point at them.
+@post "/api/check_feedback" function(req::HTTP.Request)
+    if isnothing(STATE["temp_archive_dir"])
+        return Dict("status" => "error", "message" => "No archive loaded")
+    end
+    try
+        grading_data = _read_file_from_temp("grading_data.json"; give_default=true)
+        entries = Tuple{String,String,String}[]  # (assn_id, question_id, feedback)
+        for (assn_key, entry) in pairs(grading_data)
+            string(assn_key) == "feedback-templates" && continue
+            isa(entry, AbstractDict) || continue
+            questions = get(entry, "questions", nothing)
+            isa(questions, AbstractVector) || continue
+            for q in questions
+                isa(q, AbstractDict) || continue
+                fb = get(q, "feedback", nothing)
+                (isa(fb, AbstractString) && !isempty(strip(fb))) || continue
+                push!(entries, (string(assn_key), string(get(q, "id", "")), String(fb)))
+            end
+        end
+        texts = unique(last.(entries))
+        errors = Dict(zip(texts, typst_check_markup(texts)))
+        invalid = Dict{String,Any}[]
+        for (assn_id, question_id, fb) in entries
+            err = errors[fb]
+            isnothing(err) && continue
+            push!(invalid, merge(Dict{String,Any}("assn_id" => assn_id, "question_id" => question_id), err))
+        end
+        sort!(invalid; by=e -> (something(tryparse(Int, e["assn_id"]), typemax(Int)), e["assn_id"]))
+        return Dict("status" => "success", "invalid" => invalid)
+    catch e
+        return Dict("status" => "error", "message" => sprint(showerror, e))
+    end
+end
+
 # Compile per-student feedback PDFs next to the loaded .assn archive (outside the temp dir).
 @post "/api/export_feedback" function(req::HTTP.Request)
     temp_dir = STATE["temp_archive_dir"]

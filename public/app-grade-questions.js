@@ -682,6 +682,65 @@ function appendFeedbackTemplate(existing, template) {
     return current + gap + template;
 }
 
+// Server `typst eval` results keyed by text; graders revisit the same boxes and reuse templates.
+const typstMarkupCheckCache = new Map();
+
+// Resolves to null when `text` evaluates (or the check itself failed), else {message, line, column}.
+function checkTypstMarkup(text) {
+    if (!String(text).trim()) return Promise.resolve(null);
+    if (!typstMarkupCheckCache.has(text)) {
+        const pending = fetch('/api/check_typst_markup', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text }),
+        })
+            .then((res) => res.json())
+            .then((data) => {
+                if (data.status !== 'success') throw new Error(data.message || 'check failed');
+                return data.error || null;
+            })
+            .catch(() => {
+                typstMarkupCheckCache.delete(text);
+                return null;
+            });
+        typstMarkupCheckCache.set(text, pending);
+    }
+    return typstMarkupCheckCache.get(text);
+}
+
+function formatTypstMarkupError(err) {
+    const where = err.line ? ` (line ${err.line}, column ${err.column})` : '';
+    return `Typst error${where}: ${err.message}`;
+}
+
+// Flags `field` and shows the Typst error under it once typing pauses or the field loses focus.
+// `transform` maps the field text to what will actually be rendered. Returns a function that
+// re-checks now and resolves to the error (or null).
+function attachTypstMarkupCheck(field, { transform = (t) => t } = {}) {
+    const box = field.closest('.typst-highlight-wrap') || field;
+    const msg = document.createElement('div');
+    msg.className = 'typst-check-error hidden';
+    box.insertAdjacentElement('afterend', msg);
+    let timer = null;
+    const run = async () => {
+        clearTimeout(timer);
+        const text = transform(field.value || '');
+        const err = await checkTypstMarkup(text);
+        if (transform(field.value || '') !== text) return err;
+        box.classList.toggle('typst-check-invalid', !!err);
+        msg.textContent = err ? formatTypstMarkupError(err) : '';
+        msg.classList.toggle('hidden', !err);
+        return err;
+    };
+    field.addEventListener('input', () => {
+        clearTimeout(timer);
+        timer = setTimeout(run, 600);
+    });
+    field.addEventListener('blur', run);
+    run();
+    return run;
+}
+
 // Resolves to the typed template text, or null if the grader backed out. Passing `initialText`
 // opens the modal to edit an existing template.
 function openFeedbackTemplateModal(initialText = null) {
@@ -700,6 +759,13 @@ function openFeedbackTemplateModal(initialText = null) {
         if (title) title.textContent = isEdit ? 'Edit Feedback Template' : 'New Feedback Template';
         saveBtn.textContent = isEdit ? 'Save Changes' : 'Save Template';
         textarea.value = isEdit ? initialText : '';
+        if (!textarea._typstCheck) {
+            textarea._typstCheck = attachTypstMarkupCheck(textarea, {
+                transform: (t) => t.split('{{name}}').join('Name'),
+            });
+        }
+        const check = textarea._typstCheck;
+        check();
         modal.classList.remove('hidden');
         textarea.focus();
         const finish = (value) => {
@@ -710,7 +776,13 @@ function openFeedbackTemplateModal(initialText = null) {
             modal.onkeydown = null;
             resolve(value);
         };
-        saveBtn.onclick = () => finish(textarea.value);
+        saveBtn.onclick = async () => {
+            if (await check()) {
+                textarea.focus();
+                return;
+            }
+            finish(textarea.value);
+        };
         cancelBtn.onclick = () => finish(null);
         closeBtn.onclick = () => finish(null);
         modal.onkeydown = (e) => {
@@ -1158,6 +1230,7 @@ async function renderGradeStep() {
     feedbackWrap.appendChild(feedbackLabel);
     feedbackWrap.appendChild(feedbackInput);
     if (typeof enhanceTypstMarkupFields === 'function') enhanceTypstMarkupFields(feedbackWrap);
+    attachTypstMarkupCheck(feedbackInput);
 
     const saveTemplateBtn = document.createElement('button');
     saveTemplateBtn.type = 'button';
@@ -1338,17 +1411,19 @@ function setExportModalContent({ title, bodyHtml, actionsHtml = "", showClose = 
     openExportModal();
 }
 
-function showUngradedErrorModal(info) {
-    const qId = String(info.questionId ?? "");
-    const assnId = String(info.assnId ?? "");
+function showGradeItem(questionId, assnId) {
+    const qId = String(questionId ?? "");
     const qIdx = questionIds.indexOf(qId);
-    if (qIdx >= 0) {
-        currentQIndex = qIdx;
-        const assnKeys = Object.keys(questionsMap[qId]?.assns || {});
-        const aIdx = assnKeys.indexOf(assnId);
-        currentAssnIndexForQ = aIdx >= 0 ? aIdx : 0;
-        renderGradeStep();
-    }
+    if (qIdx < 0) return;
+    currentQIndex = qIdx;
+    const assnKeys = Object.keys(questionsMap[qId]?.assns || {});
+    const aIdx = assnKeys.indexOf(String(assnId ?? ""));
+    currentAssnIndexForQ = aIdx >= 0 ? aIdx : 0;
+    renderGradeStep();
+}
+
+function showUngradedErrorModal(info) {
+    showGradeItem(info.questionId, info.assnId);
     setExportModalContent({
         title: "Cannot Finish & Export",
         bodyHtml: `
@@ -1362,6 +1437,47 @@ function showUngradedErrorModal(info) {
         `,
         actionsHtml: "",
         showClose: true,
+    });
+}
+
+// Saved feedback that would fail to render, as [{assn_id, question_id, message, line, column}].
+// A failed check returns [] so export proceeds and reports any error itself.
+async function findInvalidFeedback() {
+    try {
+        const res = await fetch('/api/check_feedback', { method: 'POST' });
+        const data = await res.json();
+        return res.ok && data.status === "success" && Array.isArray(data.invalid) ? data.invalid : [];
+    } catch (e) {
+        return [];
+    }
+}
+
+function showInvalidFeedbackModal(invalid) {
+    const shown = invalid.slice(0, 20);
+    const rows = shown.map((e, i) => `
+        <li class="invalid-feedback-item">
+            <button type="button" data-invalid-idx="${i}">Go</button>
+            <span><strong>Question ${escapeHtml(e.question_id)}</strong>, Assn ${escapeHtml(e.assn_id)}:
+            ${escapeHtml(formatTypstMarkupError(e))}</span>
+        </li>`).join("");
+    const more = invalid.length > shown.length ? `<p>…and ${invalid.length - shown.length} more.</p>` : "";
+    setExportModalContent({
+        title: "Cannot Finish & Export",
+        bodyHtml: `
+            <p>${invalid.length === 1 ? "This feedback has" : `These ${invalid.length} feedbacks have`} invalid Typst and would fail to render:</p>
+            <ul class="invalid-feedback-list">${rows}</ul>
+            ${more}
+            <p>Fix ${invalid.length === 1 ? "it" : "them"}, then run Finish &amp; Export again.</p>
+        `,
+        actionsHtml: "",
+        showClose: true,
+    });
+    document.querySelectorAll('#export-modal-body [data-invalid-idx]').forEach((btn) => {
+        btn.onclick = () => {
+            const e = shown[Number(btn.dataset.invalidIdx)];
+            closeExportModal();
+            showGradeItem(e.question_id, e.assn_id);
+        };
     });
 }
 
@@ -1679,6 +1795,12 @@ async function finishGrading() {
     setFinishExportLoading(true);
     try {
         await commitCurrentGradingData();
+
+        const invalidFeedback = await findInvalidFeedback();
+        if (invalidFeedback.length) {
+            showInvalidFeedbackModal(invalidFeedback);
+            return;
+        }
 
         exportModalState = {
             detailedCsvPath: null,

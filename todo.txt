@@ -10,7 +10,6 @@
 - [ ] pinpoint slowdowns, large files
 	- [ ] verify scans and finalize take forever
 	- [ ] first load of directory/file select modal takes too long
-- [ ] initial "Verify Scans?" modal says how many need to be checked
 - [ ] Verify Scans shows count of how many need to be completed
 - [ ] be able to manage google drive folders/files using auxilliary function?
 - [ ] allow discard changes for moving away from verify scans
@@ -28,6 +27,7 @@
 - [ ] Move the "Next blah (x remaining)" buttons to be below the drop downs.
 - [ ] offending anchors highlighted differently in Verify Scans, live update of if they will be rejected in the reverify, way to force accept anchors, error if reverify doesn't work
 - [ ] way to edit scans of particular pages in grading?
+- [ ] line above and below shuffle in top-level settings in assn builder
 
 COMPLETED, UNTESTED
 - [x] toggle preview option between seeing example and key

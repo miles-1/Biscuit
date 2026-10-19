@@ -869,6 +869,31 @@ input[type="number"].score-input {
     font-size: 0.9rem;
     resize: vertical;
 }
+.typst-check-invalid,
+.typst-check-invalid > .typst-highlight-pre,
+.typst-check-invalid > .typst-highlight-field {
+    border-color: #dc2626 !important;
+}
+.typst-check-error {
+    margin-top: 4px;
+    font-size: 0.85rem;
+    color: #dc2626;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+.invalid-feedback-list {
+    list-style: none;
+    padding: 0;
+    margin: 8px 0;
+    max-height: 40vh;
+    overflow: auto;
+}
+.invalid-feedback-item {
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+    margin-bottom: 6px;
+}
 .feedback-template-help {
     margin-top: 12px;
     font-size: 0.86rem;
