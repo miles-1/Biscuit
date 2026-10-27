@@ -96,11 +96,20 @@ function find_data_matrix(image_3d::AbstractArray{UInt8, 3}; kernel_size::NTuple
         corner_patched_3d = cv.morphologyEx(corner, cv.MORPH_OPEN, kernel)
         parsed = try_decode_assn_page_matrix(corner_patched_3d)
     end
-    if isempty(parsed)
-        println("    No data matrix found on this page.")
-        return NamedTuple()
-    end
     return parsed
+end
+
+# Pages scanned upside down carry the matrix in the top-right corner. Returns the decoded
+# matrix, the page in the orientation it was found in, and whether that meant rotating it.
+function find_data_matrix_either_way(image_3d::AbstractArray{UInt8, 3})
+    dm_data = find_data_matrix(image_3d)
+    isempty(dm_data) || return (dm_data, image_3d, false)
+    println("    No data matrix in the bottom-left corner; trying the page upside down...")
+    rotated = rotate_page_180(image_3d)
+    dm_data = find_data_matrix(rotated)
+    isempty(dm_data) || return (dm_data, rotated, true)
+    println("    No data matrix found on this page.")
+    return (dm_data, image_3d, false)
 end
 
 function find_anchor_squares(image_3d::AbstractArray{UInt8, 3})::Vector{NTuple{2, Float64}}
@@ -192,10 +201,11 @@ function extract_tiff_data(
     scan::ScanInputSession;
     corrections::Dict{String, Any}=Dict{String, Any}(),
     page_elements_data,
-)::Tuple{Dict{Int64, Dict{Int64, NamedTuple}}, Dict{Int64, NTuple{2, Int64}}, Dict{Int64, Dict{String, Any}}}
+)::Tuple{Dict{Int64, Dict{Int64, NamedTuple}}, Dict{Int64, NTuple{2, Int64}}, Dict{Int64, Dict{String, Any}}, Vector{Int64}}
     tiff_data = Dict{Int64, Dict{Int64, NamedTuple}}()
     ppage_dict = Dict{Int64, NTuple{2, Int64}}()
     identify_issues = Dict{Int64, Dict{String, Any}}()
+    auto_rotated = Int64[]
     decoded = NamedTuple[]
     printstyled("Reading Data Matrices and Locating Anchors\n"; bold=true, underline=true)
     pages = load_binary_pages(scan)
@@ -213,9 +223,13 @@ function extract_tiff_data(
         w, h = Int64(size(image_3d, 2)), Int64(size(image_3d, 3))
 
         dm_data = if isnothing(c) || !haskey(c, "assn_id")
-            find_data_matrix(image_3d)
+            dm, image_3d, flipped = find_data_matrix_either_way(image_3d)
+            if flipped
+                push!(auto_rotated, ppage_indx)
+                println(" "^4 * "Rotated 180° automatically (scanned upside down)")
+            end
+            dm
         else
-            @assert haskey(c, "assn_id") "correction for page $ppage_indx missing assn_id"
             (; assn_id=Int64(c["assn_id"]), page=Int64(c["page"]))
         end
 
@@ -279,7 +293,22 @@ function extract_tiff_data(
         end
         identify_issues[d.ppage_indx] = issue
     end
-    return tiff_data, ppage_dict, identify_issues
+    return tiff_data, ppage_dict, identify_issues, auto_rotated
+end
+
+# Later stages re-read the scan and rotate through `corrections`, so automatic rotations are
+# added there (on a copy; the caller's corrections stay as Verify Scans sent them).
+function _with_auto_rotations(corrections::Dict{String, Any}, auto_rotated::Vector{Int64})::Dict{String, Any}
+    isempty(auto_rotated) && return corrections
+    effective = copy(corrections)
+    for ppage_indx in auto_rotated
+        c = get(effective, string(ppage_indx), nothing)
+        entry = isa(c, AbstractDict) ? Dict{String, Any}(c) : Dict{String, Any}()
+        entry["rotate_180"] = !_correction_rotates_page(entry)
+        entry["auto_rotated"] = true
+        effective[string(ppage_indx)] = entry
+    end
+    return effective
 end
 
 function get_mapped_data(
@@ -681,11 +710,16 @@ function generate_marked_tiffs(
         frame_cv = maybe_corrected_page(frame_cv, corrections, ppage_indx)
         frame_cv === nothing && continue
         w, h = size(frame_cv, 2), size(frame_cv, 3)
+        c = _page_correction(corrections, ppage_indx)
+        # Verify Scans shows this (possibly rotated) frame but saves corrections against the
+        # original scan, so it needs to know which pages were turned.
         page_info = Dict{String, Any}(
             "ppage_indx" => ppage_indx,
             "width" => w,
             "height" => h,
-            "identified" => false
+            "identified" => false,
+            "rotated_180" => _correction_rotates_page(c),
+            "auto_rotated" => c !== nothing && get(c, "auto_rotated", false) === true,
         )
         
         if haskey(ppage_dict, ppage_indx)
@@ -1076,12 +1110,13 @@ function process_scans(
             @assert isfile(page_elements_file) "Missing page_elements.json in assnversions archive: $assn_versions_file"
             annotated_dir = joinpath(archive_dir, "annotated")
             page_elements_data = load_page_elements_data(page_elements_file)
-            tiff_data, ppage_dict, identify_issues = extract_tiff_data(scan; corrections, page_elements_data)
+            tiff_data, ppage_dict, identify_issues, auto_rotated = extract_tiff_data(scan; corrections, page_elements_data)
+            effective_corrections = _with_auto_rotations(corrections, auto_rotated)
             mapped_data = get_mapped_data(; tiff_data, page_elements_data)
-            assn_data = get_question_info_by_assn(scan; mapped_data, page_elements_data, ppage_dict, corrections)
+            assn_data = get_question_info_by_assn(scan; mapped_data, page_elements_data, ppage_dict, corrections=effective_corrections)
             processed_assn_data = process_assn_data(assn_data; mapped_data, output_dir=archive_dir)
             # Snapshot before annotation: the marks drawn below would otherwise land in the crops.
-            snapshot_name_crops(; scan, processed_assn_data, ppage_dict, archive_dir, corrections)
+            snapshot_name_crops(; scan, processed_assn_data, ppage_dict, archive_dir, corrections=effective_corrections)
             if namereader_file !== nothing && !isempty(strip(String(namereader_file)))
                 apply_name_reader_guesses!(
                     processed_assn_data;
@@ -1090,10 +1125,10 @@ function process_scans(
                     mapped_data,
                     archive_dir,
                     namereader_file=String(namereader_file),
-                    corrections,
+                    corrections=effective_corrections,
                 )
             end
-            generate_marked_tiffs(scan; ppage_dict, tiff_data, mapped_data, processed_assn_data, output_dir=annotated_dir, identify_issues, corrections)
+            generate_marked_tiffs(scan; ppage_dict, tiff_data, mapped_data, processed_assn_data, output_dir=annotated_dir, identify_issues, corrections=effective_corrections)
             make_archive_from_dir(archive_dir, assn_archive_file)
             println("Updated: $assn_archive_file (added processed_assn_data.json and annotated scans)")
             stale_tmp = abspath(assn_archive_file) * ".tmp"

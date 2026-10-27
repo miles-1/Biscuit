@@ -75,9 +75,8 @@ function updateGradeDropdowns() {
     }));
     renderStatusDropdown('grade-assn-dropdown', assnItems, currentAssnIndexForQ, jumpToGradeAssn);
     // buttons
-    const assnId = currentGradeAssnId();
-    document.getElementById('btn-prev-q').disabled = (findQuestionWithAssn(currentQIndex, -1, assnId) < 0);
-    document.getElementById('btn-next-q').disabled = (findQuestionWithAssn(currentQIndex, 1, assnId) < 0);
+    document.getElementById('btn-prev-q').disabled = (currentQIndex <= 0);
+    document.getElementById('btn-next-q').disabled = (currentQIndex >= questionIds.length - 1);
     document.getElementById('btn-prev-assn-grade').disabled = (currentAssnIndexForQ <= 0);
     document.getElementById('btn-next-assn-grade').disabled = (currentAssnIndexForQ >= Object.keys(currentAssns).length - 1);
     const ungraded = ungradedAssnIndicesForQ().length;
@@ -122,11 +121,24 @@ async function jumpToGradeAssn(idx) {
     currentAssnIndexForQ = parseInt(idx);
     renderGradeStep();
 }
+async function showQuestionFromFirstAssn(qIndex) {
+    await commitCurrentGradingData();
+    currentQIndex = qIndex;
+    currentAssnIndexForQ = 0;
+    renderGradeStep();
+}
 async function prevQ() {
+    if (currentQIndex > 0) await showQuestionFromFirstAssn(currentQIndex - 1);
+}
+async function nextQ() {
+    if (currentQIndex < questionIds.length - 1) await showQuestionFromFirstAssn(currentQIndex + 1);
+}
+// Shift+Up/Down: stay on this assignment, skipping questions it does not have.
+async function prevQSameAssn() {
     const target = findQuestionWithAssn(currentQIndex, -1, currentGradeAssnId());
     if (target >= 0) await showQuestionKeepingAssn(target);
 }
-async function nextQ() {
+async function nextQSameAssn() {
     const target = findQuestionWithAssn(currentQIndex, 1, currentGradeAssnId());
     if (target >= 0) await showQuestionKeepingAssn(target);
 }
@@ -1494,7 +1506,7 @@ function showExportResultModal() {
     }
     if (exportModalState.nameTrainingDir) {
         const summary = exportModalState.nameTrainingSummary;
-        lines.push(`Name training data${summary ? ` (${summary})` : ''} stored in:\n${exportModalState.nameTrainingDir}. Click "classes" above to manually validate data.`);
+        lines.push(`Name training data${summary ? ` (${summary})` : ''} stored in:\n${exportModalState.nameTrainingDir}. Use Validate Data on the Name Recognition screen to check it.`);
     }
     const bodyParts = [
         `<div class="path-block">${lines.join("\n\n")}</div>`,

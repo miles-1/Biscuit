@@ -215,6 +215,7 @@
         <button type="button" id="nr-train-btn" onclick="trainNameReader(false)">Train</button>
         <button type="button" id="nr-finetune-btn" onclick="trainNameReader(true)">Fine-Tune</button>
         <button type="button" id="nr-stop-btn" onclick="stopNameReaderTraining()" disabled>Cancel Training</button>
+        <button type="button" id="nr-validate-btn" onclick="openNameDataValidation()">Validate Data</button>
         <button type="button" onclick="goHome()">Back</button>
         <h3>Output:</h3>
         <pre class="output" id="nr-output"></pre>
@@ -437,6 +438,23 @@
         </div>
     </div>
 
+    <div id="nr-validate-modal" class="hidden modal-overlay" role="dialog" aria-modal="true" aria-labelledby="nr-validate-title">
+        <div class="modal-card nr-validate-card">
+            <div class="modal-card-header">
+                <h3 id="nr-validate-title">Validate Name Data</h3>
+                <button type="button" class="modal-close-btn" id="nr-validate-close" aria-label="Close">&times;</button>
+            </div>
+            <div class="nr-validate-nav">
+                <button type="button" id="nr-validate-prev">&larr; Prev Student</button>
+                <select id="nr-validate-student"></select>
+                <button type="button" id="nr-validate-next">Next Student &rarr;</button>
+                <span id="nr-validate-position" class="nr-validate-position"></span>
+            </div>
+            <p class="nr-validate-help">Click an image to select it, then delete it or reassign it to another student. Shift+click deletes an image straight away. Left/right arrow keys switch students.</p>
+            <div id="nr-validate-body" class="nr-validate-body"></div>
+        </div>
+    </div>
+
     <div id="feedback-template-modal" class="hidden modal-overlay" role="dialog" aria-modal="true" aria-labelledby="feedback-template-title">
         <div class="modal-card">
             <div class="modal-card-header">
@@ -554,6 +572,7 @@
 
     <script src="app-globals.js"></script>
     <script src="app-setup.js"></script>
+    <script src="app-name-validate.js"></script>
     <script src="app-builder.js"></script>
     <script src="app-classes.js"></script>
     <script src="app-verify.js"></script>

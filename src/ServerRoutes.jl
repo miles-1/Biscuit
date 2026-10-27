@@ -774,6 +774,66 @@ end
     end
 end
 
+# Every stored name image per student, for the Validate Data view.
+@get "/api/class_name_images" function(req::HTTP.Request)
+    query = HTTP.URIs.queryparams(HTTP.URI(req.target))
+    class_name = _optional_path(get(query, "class_name", nothing))
+    if class_name === nothing
+        return Dict("status" => "error", "message" => "`class_name` is required.")
+    end
+    try
+        listing = class_name_images_listing(class_name)
+        listing["status"] = "success"
+        return listing
+    catch e
+        return Dict("status" => "error", "message" => "Could not list name images for $(class_name): $(sprint(showerror, e))")
+    end
+end
+
+@get "/api/class_name_image" function(req::HTTP.Request)
+    query = HTTP.URIs.queryparams(HTTP.URI(req.target))
+    try
+        path = class_name_image_file(
+            string(get(query, "class_name", "")),
+            string(get(query, "student", "")),
+            string(get(query, "file", "")),
+        )
+        # File names are content hashes, so a given URL always shows the same pixels.
+        return HTTP.Response(200, ["Content-Type" => "image/png", "Cache-Control" => "max-age=3600"], read(path))
+    catch e
+        return HTTP.Response(404, sprint(showerror, e))
+    end
+end
+
+@post "/api/class_name_image/delete" function(req::HTTP.Request)
+    data = Oxygen.json(req)
+    try
+        delete_class_name_image!(
+            string(get(data, "class_name", "")),
+            string(get(data, "student", "")),
+            string(get(data, "file", "")),
+        )
+        return Dict("status" => "success")
+    catch e
+        return Dict("status" => "error", "message" => sprint(showerror, e))
+    end
+end
+
+@post "/api/class_name_image/reassign" function(req::HTTP.Request)
+    data = Oxygen.json(req)
+    try
+        reassign_class_name_image!(
+            string(get(data, "class_name", "")),
+            string(get(data, "student", "")),
+            string(get(data, "file", "")),
+            string(get(data, "to_student", "")),
+        )
+        return Dict("status" => "success")
+    catch e
+        return Dict("status" => "error", "message" => sprint(showerror, e))
+    end
+end
+
 # Class + name-reader context for a .assnversions / .assn path, used to offer name guessing
 # and to flag a roster that has drifted from the app's copy.
 @post "/api/archive_class_info" function(req::HTTP.Request)

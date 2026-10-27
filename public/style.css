@@ -421,6 +421,84 @@ button:disabled { opacity: 0.55; cursor: default; }
     margin-top: 4px;
 }
 /* Status line describing the handwriting stored for the selected class. */
+.nr-validate-card {
+    width: min(1100px, calc(100vw - 40px));
+    max-height: calc(100vh - 40px);
+    display: flex;
+    flex-direction: column;
+    box-sizing: border-box;
+}
+.nr-validate-nav {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.nr-validate-nav select { min-width: 220px; }
+.nr-validate-position {
+    font-size: 0.9rem;
+    color: var(--muted, #666);
+}
+.nr-validate-help {
+    font-size: 0.86rem;
+    color: var(--muted, #666);
+    margin: 8px 0;
+}
+.nr-validate-body {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+}
+.nr-validate-group h4 { margin: 10px 0 6px; }
+.nr-validate-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: flex-start;
+}
+.nr-validate-tile {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-width: 280px;
+}
+.nr-validate-tile img {
+    display: block;
+    max-width: 280px;
+    max-height: 120px;
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    cursor: pointer;
+}
+.nr-validate-tile.is-selected img {
+    outline: 3px solid #dc2626;
+    outline-offset: 1px;
+}
+.nr-split-badge {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    padding: 1px 6px;
+    border-radius: 8px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: #fff;
+    pointer-events: none;
+}
+.nr-split-train { background: #2563eb; }
+.nr-split-test { background: #7c3aed; }
+.nr-split-new { background: #6b7280; }
+.nr-validate-actions {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+.nr-validate-actions button,
+.nr-validate-actions select { margin: 0; }
+.nr-validate-delete { color: #dc2626; }
 .nr-class-status {
     font-size: 13px;
     line-height: 1.5;

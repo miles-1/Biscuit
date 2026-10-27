@@ -281,8 +281,8 @@ document.addEventListener('keydown', function(e) {
     if (isSectionVisible(gradingUI) && isSectionVisible(gradeStep2)) {
         if (e.key === 'ArrowLeft') prevGradeAssn();
         else if (e.key === 'ArrowRight') nextGradeAssn();
-        else if (e.key === 'ArrowUp') prevQ();
-        else if (e.key === 'ArrowDown') nextQ();
+        else if (e.key === 'ArrowUp') e.shiftKey ? prevQSameAssn() : prevQ();
+        else if (e.key === 'ArrowDown') e.shiftKey ? nextQSameAssn() : nextQ();
     }
 });
 

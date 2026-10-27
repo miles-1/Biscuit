@@ -272,21 +272,23 @@ function renderVerifyPage() {
     // Load correction if exists, otherwise defaults
     const c_key = String(page.ppage_indx);
     const existingCorrection = verifyCorrections[c_key];
-    verifyFlip180 = !!(existingCorrection && existingCorrection.rotate_180);
+    verifyFlip180 = existingCorrection
+        ? !!existingCorrection.rotate_180 !== pageShownRotated(page)
+        : false;
     applyVerifyFlipVisual();
     
     if (existingCorrection && !existingCorrection.delete) {
         assnIdInput.value = existingCorrection.assn_id;
         pageNumInput.value = existingCorrection.page;
         verifyAnchors = Array.isArray(existingCorrection.tiff_anchors)
-            ? existingCorrection.tiff_anchors.map((a) => [...a])
+            ? anchorsBetweenShownAndScan(page, existingCorrection.tiff_anchors)
             : computerAnchorsForPage(page);
         status.textContent = "Corrected (Pending Finalize)";
         status.style.color = "#d97706"; // Amber
     } else if (page.identified && page.anchors_ok !== false) {
         assnIdInput.value = page.assn_id;
         pageNumInput.value = page.page;
-        status.textContent = "Identified";
+        status.textContent = page.auto_rotated ? "Identified (rotated 180° automatically)" : "Identified";
         status.style.color = "#16a34a";
         verifyAnchors = computerAnchorsForPage(page);
     } else {
@@ -319,6 +321,18 @@ function renderVerifyPage() {
 function computerAnchorsForPage(page) {
     if (!Array.isArray(page?.tiff_anchors)) return [];
     return page.tiff_anchors.map((a) => [...a]);
+}
+
+// The shown image is already turned when processing rotated the page (e.g. it was found upside
+// down), but corrections are applied to the original scan. The flip and the anchors are kept
+// relative to the shown image here and converted when a correction is saved or loaded.
+function pageShownRotated(page) {
+    return page?.rotated_180 === true;
+}
+
+function anchorsBetweenShownAndScan(page, anchors) {
+    if (!pageShownRotated(page)) return anchors.map((a) => [...a]);
+    return anchors.map(([x, y]) => [page.width - x, page.height - y]);
 }
 
 function handleVerifyClick(e) {
@@ -421,8 +435,8 @@ function saveVerifyCorrection() {
     const correction = {
         assn_id: parseInt(assnIdInput),
         page: parseInt(pageNumInput),
-        tiff_anchors: [...verifyAnchors],
-        rotate_180: !!verifyFlip180,
+        tiff_anchors: anchorsBetweenShownAndScan(page, verifyAnchors),
+        rotate_180: verifyFlip180 !== pageShownRotated(page),
     };
     
     verifyCorrections[String(page.ppage_indx)] = correction;

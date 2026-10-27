@@ -29,12 +29,13 @@ export is_scan_path
 
 const SCAN_IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".tif", ".tiff")
 const SCAN_PDF_EXTENSIONS = (".pdf",)
-# Matches the documented "at least 200 dpi" guidance with headroom for data-matrix reads.
-const PDF_RASTER_DPI = 300
+# Matches the documented "at least 200 dpi" guidance, and the resolution copiers scan at,
+# so pages come out pixel for pixel rather than interpolated.
+const PDF_RASTER_DPI = 200
 
 """
 Resolved scan source. `files` is the ordered list of raster files (PNG/JPEG/TIFF)
-to feed OpenCV; PDFs have already been turned into PNGs under `temp_dirs`.
+to feed OpenCV; PDFs have already been turned into grayscale TIFFs under `temp_dirs`.
 """
 mutable struct ScanInputSession
     source::String
@@ -137,17 +138,18 @@ function rasterize_pdf_to_dir(
     isfile(pdf_path) || throw(ArgumentError("PDF not found: $pdf_path"))
     mkpath(out_dir)
     prefix = joinpath(out_dir, "page")
-    # `-forcenum` so a one-page PDF is `page-1.png`, same pattern as longer files.
+    # `-forcenum` so a one-page PDF is `page-1.tif`, same pattern as longer files.
+    # Gray PackBits TIFF, not PNG: PNG's deflate step took ~90% of the rasterizing time.
     pdftoppm() do exe
         try
-            run(`$exe -png -r $(Int(dpi)) -forcenum -q $pdf_path $prefix`)
+            run(`$exe -tiff -tiffcompression packbits -gray -r $(Int(dpi)) -forcenum -q $pdf_path $prefix`)
         catch e
             error("Failed to rasterize PDF $(pdf_path) at $(dpi) dpi: $e")
         end
     end
-    pngs = filter(name -> endswith(lowercase(name), ".png"), readdir(out_dir))
-    isempty(pngs) && error("pdftoppm produced no pages from $pdf_path")
-    return [joinpath(out_dir, name) for name in natural_sort(pngs)]
+    tiffs = filter(name -> endswith(lowercase(name), ".tif"), readdir(out_dir))
+    isempty(tiffs) && error("pdftoppm produced no pages from $pdf_path")
+    return [joinpath(out_dir, name) for name in natural_sort(tiffs)]
 end
 
 function expand_scan_file!(temps::Vector{String}, path::AbstractString)::Vector{String}
